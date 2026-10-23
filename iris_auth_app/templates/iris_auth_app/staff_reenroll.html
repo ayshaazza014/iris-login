@@ -1,0 +1,55 @@
+{% extends 'iris_auth_app/base.html' %}
+{% load static %}
+
+{% block title %}Staff Iris Re-enrollment{% endblock %}
+
+{% block content %}
+<div class="form-card">
+    <div class="form-header">
+        <h2>Staff Iris Re-enrollment</h2>
+        <p>Select the verified student account, then upload a fresh iris image or capture one with the camera. The previous template is replaced only after the new image passes validation.</p>
+    </div>
+
+    {% if messages %}
+        {% for message in messages %}
+            <div class="message-box {% if message.tags %}{{ message.tags }}{% endif %}">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+
+    <div id="camera-status" class="message-box info">Camera is not active yet.</div>
+
+    <form id="auth-form" method="post" enctype="multipart/form-data" class="form-grid">
+        {% csrf_token %}
+        <div class="input-group">
+            <label for="user_id">Student account</label>
+            <select id="user_id" name="user_id" required>
+                <option value="">Choose a student</option>
+                {% for student in students %}
+                    <option value="{{ student.pk }}">{{ student.display_name|default:student.username }} ({{ student.student_id|default:"No student ID" }})</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="camera-panel">
+            <video id="camera-preview" autoplay playsinline muted width="100%" height="260"></video>
+        </div>
+
+        <div class="form-actions">
+            <button type="button" id="start-camera" class="primary-btn">Start Camera</button>
+            <button type="button" id="capture-image" class="secondary-btn" disabled>Capture Iris</button>
+            <button type="button" id="retake-image" class="ghost-btn" disabled>Retake</button>
+        </div>
+
+        <div class="input-group">
+            <label for="capture">New iris image (PNG or JPEG)</label>
+            <input id="capture" type="file" name="capture" accept="image/png,image/jpeg" required>
+        </div>
+
+        <div class="form-actions">
+            <button type="submit" class="primary-btn">Save New Iris Template</button>
+        </div>
+    </form>
+</div>
+
+<script src="{% static 'iris_auth_app/camera.js' %}"></script>
+{% endblock %}

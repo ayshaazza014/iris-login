@@ -1,0 +1,44 @@
+{% extends 'iris_auth_app/base.html' %}
+{% load static %}
+
+{% block title %}Staff Login{% endblock %}
+
+{% block content %}
+<div class="form-card">
+    <div class="form-header">
+        <h2>Staff Iris Authentication</h2>
+        <p>Upload an iris image or use the camera to access the staff dashboard. No username, password, or staff ID is required.</p>
+    </div>
+
+    {% if messages %}
+        {% for message in messages %}
+            <div class="message-box {% if message.tags %}{{ message.tags }}{% endif %}">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+
+    <div id="camera-status" class="message-box info" role="status" aria-live="polite">Choose an iris image below, or optionally use the camera.</div>
+
+    <form id="auth-form" method="post" enctype="multipart/form-data" class="form-grid" data-auto-capture="true">
+        {% csrf_token %}
+
+        <div class="camera-panel">
+            <video id="camera-preview" autoplay playsinline muted width="100%" height="260"></video>
+        </div>
+
+        <div class="form-actions">
+            <button type="button" id="start-camera" class="secondary-btn">Start Camera</button>
+            <button type="submit" class="primary-btn">Scan Iris &amp; Login</button>
+        </div>
+
+        <div class="input-group">
+            <label for="capture">Iris image (PNG or JPEG)</label>
+            <input id="capture" type="file" name="capture" accept="image/png,image/jpeg" required>
+        </div>
+
+        <div class="form-actions">
+            <a href="{% url 'login' %}" class="secondary-btn">Back to student login</a>
+        </div>
+    </form>
+</div>
+<script src="{% static 'iris_auth_app/camera.js' %}"></script>
+{% endblock %}

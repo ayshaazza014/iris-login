@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+venv/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Django
+*.sqlite3
+*.sqlite3-*
+db_backup_*.sqlite3
+media/
+staticfiles/
+
+# Generated biometric / test data
+*.npz
+*.npy
+*.png
+*.jpg
+*.jpeg
+*.bmp
+*.tif
+*.tiff
+tmp_iris_debug/
+validation_out/
+
+# Keep only the clearly synthetic image required by the test suite
+!synthetic_eye.png
+
+# IDE/editor
+.vscode/
+.idea/
+
+# Logs
+*.log

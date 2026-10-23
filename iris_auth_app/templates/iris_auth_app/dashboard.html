@@ -1,0 +1,37 @@
+{% extends 'iris_auth_app/base.html' %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="dashboard-shell">
+    <div class="dashboard-header">
+        <div>
+            <h2>Protected Dashboard</h2>
+            <p>Welcome, {{ user.display_name|default:user.username }}</p>
+        </div>
+        <div class="status-pill">Authenticated</div>
+    </div>
+
+    <div class="dashboard-grid">
+        <div class="metric">
+            <div class="metric-label">User</div>
+            <div class="metric-value">{{ user.username }}</div>
+        </div>
+        <div class="metric">
+            <div class="metric-label">Access</div>
+            <div class="metric-value">Granted</div>
+        </div>
+        <div class="metric">
+            <div class="metric-label">Security</div>
+            <div class="metric-value">Iris</div>
+        </div>
+    </div>
+
+    <div class="form-actions" style="margin-top: 28px;">
+        <form method="post" action="{% url 'logout' %}">
+            {% csrf_token %}
+            <button type="submit" class="primary-btn">Logout</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

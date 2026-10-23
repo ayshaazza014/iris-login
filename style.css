@@ -1,0 +1,34 @@
+body {
+  font-family: Arial, sans-serif;
+  background: #1e1e2f;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  margin: 0;
+}
+
+.login-box {
+  background: white;
+  padding: 30px;
+  border-radius: 15px;
+  text-align: center;
+  width: 360px;
+}
+
+video {
+  width: 100%;
+  border-radius: 10px;
+  background: black;
+  margin: 15px 0;
+}
+
+button {
+  background: #4a6cf7;
+  color: white;
+  border: none;
+  padding: 12px 25px;
+  font-size: 16px;
+  border-radius: 8px;
+  cursor: pointer;
+}

@@ -1,0 +1,36 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Iris Authentication{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'iris_auth_app/style.css' %}">
+</head>
+<body>
+    <div class="site-shell">
+        <header class="topbar">
+            <div class="brand">Iris-Based Secure Authentication</div>
+            <nav class="nav">
+                <a href="{% url 'home' %}">Home</a>
+                <a href="{% url 'login' %}">Login</a>
+                <a href="{% url 'register' %}">Register</a>
+                {% if user.is_authenticated and user.is_staff %}
+                    <a href="{% url 'staff_dashboard' %}" class="primary-btn">Dashboard</a>
+                {% else %}
+                    <a href="{% url 'dashboard' %}" class="primary-btn">Dashboard</a>
+                {% endif %}
+                <a href="{% url 'staff_login' %}">Staff login</a>
+                {% if user.is_authenticated and user.is_superuser %}
+                    <a href="{% url 'staff_register' %}">Create staff account</a>
+                {% endif %}
+                {% if user.is_authenticated and user.is_staff %}
+                    <a href="{% url 'staff_reenroll' %}">Re-enroll iris</a>
+                {% endif %}
+            </nav>
+        </header>
+
+        {% block content %}{% endblock %}
+    </div>
+</body>
+</html>
