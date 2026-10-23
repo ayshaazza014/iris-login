@@ -3,6 +3,8 @@
 
 {% block title %}Iris Login{% endblock %}
 
+{% block messages %}{% endblock %}
+
 {% block content %}
 <div class="form-card">
     <div class="form-header">
@@ -12,12 +14,8 @@
 
     {% if messages %}
         {% for message in messages %}
-            <div class="message-box {% if message.tags %}{{ message.tags }}{% endif %}">{{ message }}</div>
+            <div class="message-box {% if message.tags %}{{ message.tags }}{% endif %}" {% if message.tags == 'error' or 'error' in message.tags %}role="alert"{% else %}role="status"{% endif %}>{{ message }}</div>
         {% endfor %}
-    {% endif %}
-
-    {% if error %}
-        <div class="message-box error">{{ error }}</div>
     {% endif %}
 
     <div id="camera-status" class="message-box info" role="status" aria-live="polite">Choose an iris image below, or optionally use the camera.</div>

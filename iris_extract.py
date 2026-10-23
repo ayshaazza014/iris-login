@@ -15,6 +15,7 @@ Usage:
 Requires: pip install opencv-python numpy
 """
 import argparse
+import functools
 import glob
 import os
 
@@ -73,7 +74,7 @@ def find_iris(eye_gray):
         ys, xs = np.nonzero(m)
         if len(xs) == 0:
             return w // 2, h // 2, w // 6
-        return int(xs.mean()), int(ys.mean()), max(r_lo, int(np.sqrt(len(xs) / np.pi) * 1.8))
+        return int(xs.mean()), int(ys.mean()), min(int(0.40 * w), max(r_lo, int(np.sqrt(len(xs) / np.pi) * 1.8)))
     return best
 
 
@@ -85,6 +86,8 @@ def find_pupil(eye_gray, iris):
     yy, xx = np.mgrid[:h, :w]
     disk = np.hypot(xx - ix, yy - iy) < 0.7 * ir
     vals = blur[disk]
+    if vals.size == 0:
+        return ix, iy, int(0.35 * ir)
     thr = np.percentile(vals, 30)
     m = ((blur <= thr) & disk).astype(np.uint8) * 255
     m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
@@ -93,8 +96,11 @@ def find_pupil(eye_gray, iris):
         return ix, iy, int(0.35 * ir)
     c = max(cnts, key=cv2.contourArea)
     (cx, cy), r = cv2.minEnclosingCircle(c)
+    cx, cy = int(cx), int(cy)
+    if np.hypot(cx - ix, cy - iy) > 0.3 * ir:
+        cx, cy = ix, iy
     r = int(np.clip(r, 0.2 * ir, 0.5 * ir))   # physiological limits
-    return int(cx), int(cy), r
+    return cx, cy, r
 
 
 # --------------------------------------------------------------------------
@@ -124,7 +130,8 @@ def noise_mask(polar, valid):
     m[polar < 20] = 0                       # lashes / shadow
     m[:, :] &= 1
     # rubber-sheet top & bottom sectors are often occluded by eyelids
-    m[:, int(NORM_W * 0.20):int(NORM_W * 0.30)] = m[:, int(NORM_W * 0.20):int(NORM_W * 0.30)]
+    m[:, int(NORM_W * 0.20):int(NORM_W * 0.30)] = 0
+    m[:, int(NORM_W * 0.70):int(NORM_W * 0.80)] = 0
     return m
 
 
@@ -136,6 +143,7 @@ def enhance(polar):
 # --------------------------------------------------------------------------
 # 4. Feature encoding (Gabor -> IrisCode)
 # --------------------------------------------------------------------------
+@functools.lru_cache(maxsize=1)
 def gabor_bank(ksize=(9, 31), wavelengths=(8, 16)):
     bank = []
     for lam in wavelengths:
@@ -144,7 +152,7 @@ def gabor_bank(ksize=(9, 31), wavelengths=(8, 16)):
         k_im = cv2.getGaborKernel(ksize, sigma, 0, lam, 1.0, np.pi / 2,
                                   ktype=cv2.CV_32F)
         bank.append((k, k_im))
-    return bank
+    return tuple(bank)
 
 
 def encode(enhanced, mask):
@@ -163,18 +171,23 @@ def hamming(code1, mask1, code2, mask2, max_shift=8):
     """Normalised Hamming distance with circular shift for rotation tolerance."""
     best = 1.0
     for s in range(-max_shift, max_shift + 1):
-        c2, m2 = np.roll(code2, s, 1), np.roll(mask2, s, 1)
-        both = (mask1 & m2).astype(bool)
-        if both.sum() == 0:
+        c2 = np.roll(code2, s, 1)
+        m2 = np.roll(mask2, s, 1)
+        both = mask1 & m2
+        both_count = np.count_nonzero(both)
+        if both_count < 64:
             continue
-        best = min(best, np.logical_xor(code1, c2)[both].mean())
-    return best
+        diff_count = np.count_nonzero((code1 ^ c2) & both)
+        score = diff_count / both_count
+        if score < best:
+            best = score
+    return float(best)
 
 
 # --------------------------------------------------------------------------
 # Driver
 # --------------------------------------------------------------------------
-def process_eye(eye_bgr, tag, out_dir):
+def process_eye(eye_bgr, tag, out_dir=None):
     gray = cv2.cvtColor(eye_bgr, cv2.COLOR_BGR2GRAY)
     # upscale small ROIs for better boundary localisation
     scale = 1.0
@@ -190,15 +203,16 @@ def process_eye(eye_bgr, tag, out_dir):
     enh = enhance(polar)
     code, cmask = encode(enh, mask)
 
-    # debug overlay
-    vis = eye_bgr.copy()
-    cv2.circle(vis, pupil[:2], pupil[2], (0, 255, 0), 2)
-    cv2.circle(vis, iris[:2], iris[2], (0, 0, 255), 2)
-    cv2.imwrite(os.path.join(out_dir, f"{tag}_segmented.png"), vis)
-    cv2.imwrite(os.path.join(out_dir, f"{tag}_normalised.png"), polar)
-    cv2.imwrite(os.path.join(out_dir, f"{tag}_structure.png"), enh)
-    cv2.imwrite(os.path.join(out_dir, f"{tag}_iriscode.png"), code * 255)
-    np.savez_compressed(os.path.join(out_dir, f"{tag}_code.npz"), code=code, mask=cmask)
+    if out_dir is not None:
+        # debug overlay
+        vis = eye_bgr.copy()
+        cv2.circle(vis, pupil[:2], pupil[2], (0, 255, 0), 2)
+        cv2.circle(vis, iris[:2], iris[2], (0, 0, 255), 2)
+        cv2.imwrite(os.path.join(out_dir, f"{tag}_segmented.png"), vis)
+        cv2.imwrite(os.path.join(out_dir, f"{tag}_normalised.png"), polar)
+        cv2.imwrite(os.path.join(out_dir, f"{tag}_structure.png"), enh)
+        cv2.imwrite(os.path.join(out_dir, f"{tag}_iriscode.png"), code * 255)
+        np.savez_compressed(os.path.join(out_dir, f"{tag}_code.npz"), code=code, mask=cmask)
     return code, cmask
 
 

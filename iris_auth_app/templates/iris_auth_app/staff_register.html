@@ -3,6 +3,8 @@
 
 {% block title %}Create Staff Account{% endblock %}
 
+{% block messages %}{% endblock %}
+
 {% block content %}
 <div class="form-card">
     <div class="form-header">
@@ -12,7 +14,7 @@
 
     {% if messages %}
         {% for message in messages %}
-            <div class="message-box {% if message.tags %}{{ message.tags }}{% endif %}">{{ message }}</div>
+            <div class="message-box {% if message.tags %}{{ message.tags }}{% endif %}" {% if message.tags == 'error' or 'error' in message.tags %}role="alert"{% else %}role="status"{% endif %}>{{ message }}</div>
         {% endfor %}
     {% endif %}
 
@@ -26,7 +28,7 @@
         </div>
         <div class="input-group">
             <label for="display_name">Staff name</label>
-            <input id="display_name" type="text" name="display_name" required>
+            <input id="display_name" type="text" name="display_name" autocomplete="name" required>
         </div>
         <div class="input-group">
             <label for="email">Email (optional)</label>

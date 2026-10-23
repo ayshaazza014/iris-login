@@ -3,6 +3,8 @@
 
 {% block title %}Staff Iris Re-enrollment{% endblock %}
 
+{% block messages %}{% endblock %}
+
 {% block content %}
 <div class="form-card">
     <div class="form-header">
@@ -12,11 +14,11 @@
 
     {% if messages %}
         {% for message in messages %}
-            <div class="message-box {% if message.tags %}{{ message.tags }}{% endif %}">{{ message }}</div>
+            <div class="message-box {% if message.tags %}{{ message.tags }}{% endif %}" {% if message.tags == 'error' or 'error' in message.tags %}role="alert"{% else %}role="status"{% endif %}>{{ message }}</div>
         {% endfor %}
     {% endif %}
 
-    <div id="camera-status" class="message-box info">Camera is not active yet.</div>
+    <div id="camera-status" class="message-box info" role="status" aria-live="polite">Camera is not active yet.</div>
 
     <form id="auth-form" method="post" enctype="multipart/form-data" class="form-grid">
         {% csrf_token %}

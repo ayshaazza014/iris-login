@@ -3,6 +3,8 @@
 
 {% block title %}Staff Login{% endblock %}
 
+{% block messages %}{% endblock %}
+
 {% block content %}
 <div class="form-card">
     <div class="form-header">
@@ -12,7 +14,7 @@
 
     {% if messages %}
         {% for message in messages %}
-            <div class="message-box {% if message.tags %}{{ message.tags }}{% endif %}">{{ message }}</div>
+            <div class="message-box {% if message.tags %}{{ message.tags }}{% endif %}" {% if message.tags == 'error' or 'error' in message.tags %}role="alert"{% else %}role="status"{% endif %}>{{ message }}</div>
         {% endfor %}
     {% endif %}
 

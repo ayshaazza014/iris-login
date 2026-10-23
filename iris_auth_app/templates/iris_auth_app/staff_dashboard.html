@@ -2,6 +2,8 @@
 
 {% block title %}Staff Dashboard{% endblock %}
 
+{% block messages %}{% endblock %}
+
 {% block content %}
 <div class="dashboard-shell">
     <div class="dashboard-header">
@@ -14,7 +16,7 @@
 
     {% if messages %}
         {% for message in messages %}
-            <div class="message-box {% if message.tags %}{{ message.tags }}{% endif %}">{{ message }}</div>
+            <div class="message-box {% if message.tags %}{{ message.tags }}{% endif %}" {% if message.tags == 'error' or 'error' in message.tags %}role="alert"{% else %}role="status"{% endif %}>{{ message }}</div>
         {% endfor %}
     {% endif %}
 

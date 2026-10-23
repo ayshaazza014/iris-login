@@ -10,7 +10,7 @@
 <body>
     <div class="site-shell">
         <header class="topbar">
-            <div class="brand">Iris-Based Secure Authentication</div>
+            <a href="{% url 'home' %}" class="brand">Iris-Based Secure Authentication</a>
             <nav class="nav">
                 <a href="{% url 'home' %}">Home</a>
                 <a href="{% url 'login' %}">Login</a>
@@ -30,7 +30,17 @@
             </nav>
         </header>
 
-        {% block content %}{% endblock %}
+        <main id="main-content" class="content-shell">
+            {% block messages %}
+            {% if messages %}
+                {% for message in messages %}
+                    <div class="message-box {% if message.tags %}{{ message.tags }}{% endif %}" {% if message.tags == 'error' or 'error' in message.tags %}role="alert"{% else %}role="status"{% endif %}>{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+            {% endblock messages %}
+
+            {% block content %}{% endblock %}
+        </main>
     </div>
 </body>
 </html>

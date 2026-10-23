@@ -30,7 +30,24 @@ if not SECRET_KEY:
         raise ImproperlyConfigured('Set DJANGO_SECRET_KEY when DJANGO_DEBUG is false.')
     SECRET_KEY = secrets.token_urlsafe(50)
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', '[::1]']
+allowed_hosts_env = os.environ.get('DJANGO_ALLOWED_HOSTS')
+if allowed_hosts_env:
+    ALLOWED_HOSTS = [h.strip() for h in allowed_hosts_env.split(',') if h.strip()]
+else:
+    ALLOWED_HOSTS = ['localhost', '127.0.0.1', '[::1]']
+
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_HTTPONLY = False
+CSRF_COOKIE_SAMESITE = 'Lax'
+X_FRAME_OPTIONS = 'DENY'
+
+if not DEBUG:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_REFERRER_POLICY = 'same-origin'
 
 AUTH_USER_MODEL = 'iris_auth_app.IrisUser'
 LOGIN_URL = 'login'

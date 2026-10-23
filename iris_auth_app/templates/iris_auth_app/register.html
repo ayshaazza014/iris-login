@@ -3,6 +3,8 @@
 
 {% block title %}Register{% endblock %}
 
+{% block messages %}{% endblock %}
+
 {% block content %}
 <div class="form-card">
     <div class="form-header">
@@ -12,7 +14,7 @@
 
     {% if messages %}
         {% for message in messages %}
-            <div class="message-box {% if message.tags %}{{ message.tags }}{% endif %}">{{ message }}</div>
+            <div class="message-box {% if message.tags %}{{ message.tags }}{% endif %}" {% if message.tags == 'error' or 'error' in message.tags %}role="alert"{% else %}role="status"{% endif %}>{{ message }}</div>
         {% endfor %}
     {% endif %}
 
@@ -22,12 +24,12 @@
         {% csrf_token %}
         <div class="input-group">
             <label for="username">Username</label>
-            <input id="username" type="text" name="username" placeholder="student_001" required>
+            <input id="username" type="text" name="username" autocomplete="username" placeholder="student_001" required>
         </div>
 
         <div class="input-group">
             <label for="display_name">Display name</label>
-            <input id="display_name" type="text" name="display_name" placeholder="Student One" required>
+            <input id="display_name" type="text" name="display_name" autocomplete="name" placeholder="Student One" required>
         </div>
 
         <div class="input-group">
@@ -51,7 +53,7 @@
         </div>
 
         <div class="form-actions">
-            <button type="submit" class="primary-btn">Create Account & Enroll Iris</button>
+            <button type="submit" class="primary-btn">Create Account &amp; Enroll Iris</button>
             <a href="{% url 'login' %}" class="secondary-btn">Already have an account?</a>
         </div>
     </form>

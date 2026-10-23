@@ -1,7 +1,6 @@
 import importlib.util
 import logging
 import math
-import tempfile
 from pathlib import Path
 
 import cv2
@@ -16,14 +15,24 @@ MODULE_PATH = Path(__file__).resolve().parents[1] / 'iris_extract.py'
 MATCH_THRESHOLD = 0.32
 TEMPLATE_ENCODING_VERSION = 'gabor-eye-crop-v2'
 
+_iris_module = None
+
 
 def load_iris_module():
-    spec = importlib.util.spec_from_file_location("iris_extract", MODULE_PATH)
-    if spec is None or spec.loader is None:
-        raise ValidationError("Could not load the iris extraction module.")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    global _iris_module
+    if _iris_module is not None:
+        return _iris_module
+    try:
+        import iris_extract
+        _iris_module = iris_extract
+    except ImportError:
+        spec = importlib.util.spec_from_file_location("iris_extract", MODULE_PATH)
+        if spec is None or spec.loader is None:
+            raise ValidationError("Could not load the iris extraction module.")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _iris_module = module
+    return _iris_module
 
 
 def ensure_iris_template_for_user(
@@ -102,8 +111,7 @@ def extract_template_from_image(image_array):
         raise ValidationError('The detected eye region is invalid.')
 
     try:
-        with tempfile.TemporaryDirectory(prefix='iris-capture-') as temp_dir:
-            code, mask = module.process_eye(eye_region, 'capture', temp_dir)
+        code, mask = module.process_eye(eye_region, 'capture', out_dir=None)
     except (cv2.error, OSError, ValueError, TypeError) as exc:
         raise ValidationError('Iris feature extraction failed. Improve lighting and capture the eye again.') from exc
 
@@ -124,10 +132,12 @@ def load_user_template(user):
     template = IrisTemplate.objects.filter(user=user).first()
     if template is None:
         raise ValidationError('No iris template has been enrolled for this user.')
-    if template.encoding_version != TEMPLATE_ENCODING_VERSION:
+    if template.encoding_version not in (TEMPLATE_ENCODING_VERSION, 'gabor-v1'):
         raise ValidationError('This iris template needs to be enrolled again using the current capture process.')
 
     code, mask = template.validate_template()
+    if template.encoding_version == 'gabor-v1' and (code.shape != (256, 512) or mask.shape != (256, 512)):
+        raise ValidationError('This iris template needs to be enrolled again using the current capture process.')
     return code, mask
 
 

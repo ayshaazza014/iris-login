@@ -8,6 +8,7 @@ const authForm = document.getElementById('auth-form');
 
 let stream = null;
 let captureDataUrl = null;
+let isSubmitting = false;
 
 function setStatus(message, type = 'info') {
   if (!cameraStatus) return;
@@ -30,10 +31,20 @@ async function startCamera() {
   setStatus('Waiting for camera permission…', 'info');
 
   try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'user' },
-      audio: false,
-    });
+    let streamAttempt = null;
+    try {
+      streamAttempt = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user' },
+        audio: false,
+      });
+    } catch (constraintErr) {
+      // Graceful fallback for mobile or browsers that reject the facingMode constraint
+      streamAttempt = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: false,
+      });
+    }
+    stream = streamAttempt;
 
     if (cameraPreview) {
       cameraPreview.srcObject = stream;
@@ -151,13 +162,41 @@ if (captureInput) {
     if (!selectedFile) return;
 
     stopCamera();
-    if (cameraPreview) cameraPreview.src = '';
-    setStatus(`Image selected: ${selectedFile.name}. Camera access is not required.`, 'success');
+    if (cameraPreview) {
+      if (selectedFile.type && !selectedFile.type.startsWith('image/')) {
+        cameraPreview.src = '';
+        setStatus('Please select a valid image file (PNG or JPEG).', 'error');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        cameraPreview.srcObject = null;
+        cameraPreview.src = e.target.result;
+      };
+      reader.readAsDataURL(selectedFile);
+    }
+    setStatus(`Image selected: ${selectedFile.name}. Verify the preview or submit for iris verification.`, 'success');
+    if (captureBtn) captureBtn.disabled = true;
+    if (retakeBtn) retakeBtn.disabled = false;
   });
 }
 
 if (authForm) {
+  const submitButton = authForm.querySelector('button[type="submit"]');
+  if (submitButton) {
+    submitButton.addEventListener('pointerdown', () => {
+      if (authForm.dataset.autoCapture === 'true' && (!captureInput || !captureInput.files.length)) {
+        captureFrame();
+      }
+    });
+  }
+
   authForm.addEventListener('submit', (event) => {
+    if (isSubmitting) {
+      event.preventDefault();
+      return;
+    }
+
     if (authForm.dataset.autoCapture === 'true' && (!captureInput || !captureInput.files.length)) {
       if (!captureFrame()) {
         event.preventDefault();
@@ -171,13 +210,37 @@ if (authForm) {
       return;
     }
 
+    isSubmitting = true;
     setStatus('Processing your iris. Please wait…', 'info');
     const submitButton = authForm.querySelector('button[type="submit"]');
     if (submitButton) {
+      if (!submitButton.dataset.originalText) {
+        submitButton.dataset.originalText = submitButton.textContent;
+      }
       submitButton.disabled = true;
       submitButton.textContent = 'Processing…';
     }
   });
 }
 
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    stopCamera();
+  }
+});
+
+window.addEventListener('pagehide', stopCamera);
 window.addEventListener('beforeunload', stopCamera);
+
+window.addEventListener('pageshow', () => {
+  isSubmitting = false;
+  if (authForm) {
+    const submitButton = authForm.querySelector('button[type="submit"]');
+    if (submitButton) {
+      submitButton.disabled = false;
+      if (submitButton.dataset.originalText) {
+        submitButton.textContent = submitButton.dataset.originalText;
+      }
+    }
+  }
+});

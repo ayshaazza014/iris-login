@@ -51,6 +51,9 @@ class IrisTemplate(models.Model):
 
     @classmethod
     def deserialize_array(cls, payload, shape_value, dtype_name):
+        ALLOWED_DTYPES = {'uint8', 'int8'}
+        if dtype_name not in ALLOWED_DTYPES:
+            raise ValidationError(f'Unsupported array dtype: {dtype_name}')
         if payload in (None, b''):
             raise ValidationError('Template payload is empty.')
         shape = cls._parse_shape(shape_value)
