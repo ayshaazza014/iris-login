@@ -1,50 +1,70 @@
 {% extends 'iris_auth_app/base.html' %}
 
-{% block title %}Iris Authentication{% endblock %}
+{% block title %}SmartCampus | Secure Campus Access{% endblock %}
 
 {% block content %}
-<section class="hero">
+<section class="hero campus-hero">
     <div class="hero-copy">
-        <div class="kicker">PASSWORDLESS ACCESS</div>
-        <h1>Iris-Based Secure Authentication</h1>
-        <p class="subtitle">
-            A modern biometric login experience that verifies a user through their iris pattern,
-            combining browser capture, server-side validation, and a protected dashboard.
-        </p>
+        <div class="kicker">SMART CAMPUS PORTAL</div>
+        <h1>Welcome to <span>SmartCampus</span></h1>
+        <p class="subtitle">Your Campus. Your Identity. Your Access.</p>
+        <p class="hero-description">A secure, convenient way for students and staff to access their campus portal through iris-based authentication.</p>
 
         <div class="cta-row">
-            <a href="{% url 'login' %}" class="primary-btn">Login with Iris</a>
-            <a href="{% url 'register' %}" class="secondary-btn">Create Test Account</a>
+            <a href="{% url 'login' %}" class="primary-btn">Get Started</a>
+            <a href="#how-it-works" class="secondary-btn">Learn How It Works</a>
         </div>
 
-        <div class="privacy-box">
-            Privacy notice: this prototype stores only minimal template metadata and never exposes biometric data in browser responses.
-        </div>
+        <p class="hero-note">Built as an academic project prototype. Iris recognition is not liveness detection.</p>
     </div>
 
-    <aside class="info-card">
-        <h3>How it works</h3>
-        <ol>
-            <li>Choose an account or create a test account.</li>
-            <li>Allow the browser to access the camera.</li>
-            <li>Capture an eye image.</li>
-            <li>The server checks the iris template before granting access.</li>
-        </ol>
+    <aside class="campus-visual" aria-label="SmartCampus secure identity overview">
+        <div class="visual-topline"><span class="visual-dot"></span> CAMPUS IDENTITY</div>
+        <div class="visual-emblem" aria-hidden="true">
+            <svg viewBox="0 0 64 64" focusable="false">
+                <path d="M5 24 32 11l27 13-27 13L5 24Z"></path>
+                <path d="M16 30v13c9 8 23 8 32 0V30M58 24v17"></path>
+            </svg>
+        </div>
+        <p class="visual-label">One secure identity</p>
+        <h2>Access, made personal.</h2>
+        <div class="visual-divider"></div>
+        <div class="visual-status"><span class="status-check" aria-hidden="true">✓</span><span>Identity verified on the server</span></div>
+        <div class="visual-bottom"><span>SMARTCAMPUS</span><span>SECURE ACCESS</span></div>
     </aside>
 </section>
 
-<section class="card-grid">
-    <div class="feature-card">
-        <strong>Secure by design</strong>
-        <p>Access decisions are made on the server, not trusted to the browser.</p>
+<section id="how-it-works" class="how-section">
+    <div class="section-heading">
+        <span class="section-eyebrow">A SIMPLE, SECURE FLOW</span>
+        <h2>How it works</h2>
+        <p>Three steps connect your identity to your campus access.</p>
     </div>
-    <div class="feature-card">
-        <strong>Minimal retention</strong>
-        <p>Only the required template data and metadata are stored for verification.</p>
-    </div>
-    <div class="feature-card">
-        <strong>Academic demo</strong>
-        <p>Built to demonstrate and test the iris-authentication workflow in a safe environment.</p>
+    <div class="card-grid">
+        <article class="feature-card">
+            <span class="feature-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 5 3.4 8 8 9 4.6-1 8-4 8-9V7l-8-4Z"></path><path d="m9 12 2 2 4-4"></path></svg>
+            </span>
+            <span class="step-number">01 / ENROLL</span>
+            <h3>Register Your Identity</h3>
+            <p>Students enter their registration details and enroll an iris template with an image upload or camera capture.</p>
+        </article>
+        <article class="feature-card">
+            <span class="feature-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"></circle><circle cx="12" cy="12" r="3"></circle><path d="M2 12h2m16 0h2M12 2v2m0 16v2"></path></svg>
+            </span>
+            <span class="step-number">02 / VERIFY</span>
+            <h3>Verify Your Identity</h3>
+            <p>The server compares the submitted iris image with active, compatible registered templates.</p>
+        </article>
+        <article class="feature-card">
+            <span class="feature-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M4 20V8l8-5 8 5v12H4Z"></path><path d="M9 20v-6h6v6M8 9h.01M16 9h.01"></path></svg>
+            </span>
+            <span class="step-number">03 / ACCESS</span>
+            <h3>Access Your Campus Portal</h3>
+            <p>A successful unique match opens the dashboard permitted for that account type.</p>
+        </article>
     </div>
 </section>
 {% endblock %}

@@ -159,7 +159,8 @@ class IrisTemplateModelTests(TestCase):
         response = self.client.get('/login/')
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Scan Iris &amp; Login')
+        self.assertContains(response, 'Student Login')
+        self.assertContains(response, '>Scan Iris<')
         self.assertContains(
             response,
             '<input id="capture" type="file" name="capture" accept="image/png,image/jpeg" required>',
@@ -174,7 +175,7 @@ class IrisTemplateModelTests(TestCase):
         response = self.client.get('/register/')
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'upload an iris image, or capture one with your camera')
+        self.assertContains(response, 'enroll your iris using an image upload or camera capture')
         self.assertContains(
             response,
             '<input id="capture" type="file" name="capture" accept="image/png,image/jpeg" required>',
@@ -491,7 +492,7 @@ class IrisVerificationTests(TestCase):
         response = self.client.get('/staff/re-enroll/')
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Staff Iris Re-enrollment')
+        self.assertContains(response, 'Iris Re-enrollment')
 
     def test_non_staff_cannot_open_reenrollment_page(self):
         student = IrisUser.objects.create_user(username='ordinary-student', password='StrongPass123')
@@ -505,7 +506,7 @@ class IrisVerificationTests(TestCase):
         response = self.client.get('/staff/login/')
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Staff Iris Authentication')
+        self.assertContains(response, 'Staff Login')
         self.assertContains(response, 'Scan Iris &amp; Login')
         self.assertNotContains(response, 'name="username"')
         self.assertNotContains(response, 'name="password"')
@@ -966,4 +967,3 @@ class SecurityAndAuthenticationHardeningTests(TestCase):
         self.assertTrue(IrisUser.objects.filter(username='alice').exists())
         self.assertTrue(IrisUser.objects.filter(username='bob').exists())
         self.assertTrue(IrisUser.objects.filter(username='staff_alice', is_staff=True).exists())
-

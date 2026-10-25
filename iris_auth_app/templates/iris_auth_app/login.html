@@ -1,15 +1,16 @@
 {% extends 'iris_auth_app/base.html' %}
 {% load static %}
 
-{% block title %}Iris Login{% endblock %}
+{% block title %}Student Login | SmartCampus{% endblock %}
 
 {% block messages %}{% endblock %}
 
 {% block content %}
-<div class="form-card">
+<div class="form-card auth-page">
     <div class="form-header">
-        <h2>Student Iris Login</h2>
-        <p>Upload an iris image or use the camera to find your enrolled account. You do not need to enter your name or student ID.</p>
+        <span class="section-eyebrow">SMARTCAMPUS STUDENT PORTAL</span>
+        <h2 class="auth-title">Student Login</h2>
+        <p class="auth-subtitle">Verify your identity securely using iris authentication.</p>
     </div>
 
     {% if messages %}
@@ -29,7 +30,7 @@
 
         <div class="form-actions">
             <button type="button" id="start-camera" class="secondary-btn">Start Camera</button>
-            <button type="submit" class="primary-btn">Scan Iris &amp; Login</button>
+            <button type="submit" class="primary-btn">Scan Iris</button>
         </div>
 
         <div class="input-group">
@@ -39,6 +40,7 @@
 
         <div class="form-actions">
             <a href="{% url 'register' %}" class="secondary-btn">Register</a>
+            <a href="{% url 'home' %}" class="text-link">Back to welcome page</a>
         </div>
     </form>
 </div>

@@ -1,14 +1,15 @@
 {% extends 'iris_auth_app/base.html' %}
 {% load static %}
 
-{% block title %}Create Staff Account{% endblock %}
+{% block title %}Staff Enrollment | SmartCampus{% endblock %}
 
 {% block messages %}{% endblock %}
 
 {% block content %}
-<div class="form-card">
+<div class="form-card auth-page">
     <div class="form-header">
-        <h2>Enroll Staff Account</h2>
+        <span class="section-eyebrow">SMARTCAMPUS ADMINISTRATION</span>
+        <h2 class="auth-title">Enroll Staff Account</h2>
         <p>Only a signed-in superuser can create and iris-enroll staff accounts. Staff accounts cannot sign in with a password.</p>
     </div>
 

@@ -1,17 +1,18 @@
 {% extends 'iris_auth_app/base.html' %}
 
-{% block title %}Staff Dashboard{% endblock %}
+{% block title %}Staff Dashboard | SmartCampus{% endblock %}
 
 {% block messages %}{% endblock %}
 
 {% block content %}
-<div class="dashboard-shell">
+<section class="dashboard-shell">
     <div class="dashboard-header">
         <div>
-            <h2>Staff Dashboard</h2>
+            <span class="section-eyebrow">SMARTCAMPUS STAFF PORTAL</span>
+            <h1>Staff Dashboard</h1>
             <p>Welcome, {{ user.display_name|default:user.username }}. Your staff access was verified by iris authentication.</p>
         </div>
-        <div class="status-pill">Staff access granted</div>
+        <span class="status-pill"><span class="status-dot"></span> Staff access verified</span>
     </div>
 
     {% if messages %}
@@ -20,7 +21,7 @@
         {% endfor %}
     {% endif %}
 
-    <div class="dashboard-grid">
+    <div class="dashboard-grid staff-metrics">
         <div class="metric">
             <div class="metric-label">Staff account</div>
             <div class="metric-value">{{ user.username }}</div>
@@ -42,5 +43,5 @@
             <button type="submit" class="primary-btn">Logout</button>
         </form>
     </div>
-</div>
+</section>
 {% endblock %}

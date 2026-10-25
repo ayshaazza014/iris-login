@@ -1,15 +1,16 @@
 {% extends 'iris_auth_app/base.html' %}
 {% load static %}
 
-{% block title %}Register{% endblock %}
+{% block title %}Student Registration | SmartCampus{% endblock %}
 
 {% block messages %}{% endblock %}
 
 {% block content %}
-<div class="form-card">
+<div class="form-card auth-page">
     <div class="form-header">
-        <h2>Create Your Student Account</h2>
-        <p>Enter your account details and upload an iris image, or capture one with your camera. After enrollment, you will be sent to the iris login page.</p>
+        <span class="section-eyebrow">SMARTCAMPUS STUDENT PORTAL</span>
+        <h2 class="auth-title">Create Your SmartCampus Account</h2>
+        <p class="auth-subtitle">Add your student details, then enroll your iris using an image upload or camera capture.</p>
     </div>
 
     {% if messages %}

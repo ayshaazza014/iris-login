@@ -1,37 +1,52 @@
 {% extends 'iris_auth_app/base.html' %}
 
-{% block title %}Dashboard{% endblock %}
+{% block title %}Student Dashboard | SmartCampus{% endblock %}
 
 {% block content %}
-<div class="dashboard-shell">
+<section class="dashboard-shell">
     <div class="dashboard-header">
         <div>
-            <h2>Protected Dashboard</h2>
-            <p>Welcome, {{ user.display_name|default:user.username }}</p>
+            <span class="section-eyebrow">STUDENT PORTAL</span>
+            <h1>Welcome, {{ user.display_name|default:user.username }}</h1>
+            <p>Your secure campus access overview.</p>
         </div>
-        <div class="status-pill">Authenticated</div>
+        <span class="status-pill"><span class="status-dot"></span> Identity verified</span>
     </div>
 
-    <div class="dashboard-grid">
-        <div class="metric">
-            <div class="metric-label">User</div>
-            <div class="metric-value">{{ user.username }}</div>
-        </div>
-        <div class="metric">
-            <div class="metric-label">Access</div>
-            <div class="metric-value">Granted</div>
-        </div>
-        <div class="metric">
-            <div class="metric-label">Security</div>
-            <div class="metric-value">Iris</div>
+    <div class="dashboard-layout">
+        <aside class="profile-card">
+            <div class="profile-monogram" aria-hidden="true">{{ user.display_name|default:user.username|first|upper }}</div>
+            <span class="section-eyebrow">PROFILE</span>
+            <h2>{{ user.display_name|default:user.username }}</h2>
+            <dl class="profile-details">
+                <div><dt>Username</dt><dd>{{ user.username }}</dd></div>
+                <div><dt>Student ID</dt><dd>{{ user.student_id|default:"Not provided" }}</dd></div>
+                <div><dt>Account type</dt><dd>Student</dd></div>
+            </dl>
+            <form method="post" action="{% url 'logout' %}">
+                {% csrf_token %}
+                <button type="submit" class="secondary-btn logout-btn">Log out</button>
+            </form>
+        </aside>
+        <div class="dashboard-main">
+            <div class="dashboard-grid">
+                <article class="metric">
+                    <div class="metric-label">Authentication</div>
+                    <div class="metric-value">Verified</div>
+                    <p>Current session is authenticated.</p>
+                </article>
+                <article class="metric">
+                    <div class="metric-label">Access level</div>
+                    <div class="metric-value">Student</div>
+                    <p>Student dashboard permissions apply.</p>
+                </article>
+            </div>
+            <section class="future-panel">
+                <div><span class="section-eyebrow">CAMPUS SERVICES</span><h2>More for your campus day</h2></div>
+                <p>Attendance, timetable, announcements, and academic services are not yet available in this prototype.</p>
+                <div class="future-tags"><span>Attendance · Planned</span><span>Timetable · Planned</span><span>Announcements · Planned</span></div>
+            </section>
         </div>
     </div>
-
-    <div class="form-actions" style="margin-top: 28px;">
-        <form method="post" action="{% url 'logout' %}">
-            {% csrf_token %}
-            <button type="submit" class="primary-btn">Logout</button>
-        </form>
-    </div>
-</div>
+</section>
 {% endblock %}
