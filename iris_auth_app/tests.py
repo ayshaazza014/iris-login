@@ -166,6 +166,8 @@ class IrisTemplateModelTests(TestCase):
             '<input id="capture" type="file" name="capture" accept="image/png,image/jpeg" required>',
         )
         self.assertContains(response, 'Choose an iris image below, or optionally use the camera.')
+        self.assertContains(response, 'href="/register/"')
+        self.assertContains(response, 'Register')
         self.assertNotContains(response, 'name="username"')
         self.assertNotContains(response, 'name="password"')
         self.assertNotContains(response, 'name="student_id"')
