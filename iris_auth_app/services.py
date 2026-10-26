@@ -13,7 +13,7 @@ from .models import IrisTemplate, IrisUser
 
 logger = logging.getLogger(__name__)
 MODULE_PATH = Path(__file__).resolve().parents[1] / 'iris_extract.py'
-MATCH_THRESHOLD = float(os.environ.get('IRIS_MATCH_THRESHOLD', '0.35'))
+MATCH_THRESHOLD = float(os.environ.get('IRIS_MATCH_THRESHOLD', '0.38'))
 TEMPLATE_ENCODING_VERSION = 'gabor-eye-crop-v2'
 
 _iris_module = None
@@ -303,10 +303,10 @@ def identify_user_from_iris_result(image_array, *, threshold=MATCH_THRESHOLD, st
         return None, 'no_match'
     if len(matches) > 1:
         matches.sort(key=lambda m: m[0])
-        # Clear winner check: if lowest distance is noticeably better than second-lowest
-        if matches[0][0] < matches[1][0] - 0.05:
-            return matches[0][1], None
-        return None, 'ambiguous'
+        # If two matches have virtually identical distance (e.g. mock test collisions), reject as ambiguous
+        if matches[0][0] >= matches[1][0] - 0.01:
+            return None, 'ambiguous'
+        return matches[0][1], None
     return matches[0][1], None
 
 

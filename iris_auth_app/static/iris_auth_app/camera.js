@@ -15,6 +15,7 @@ let captureDataUrl = null;
 let isSubmitting = false;
 let liveScanTimer = null;
 let liveScanInFlight = false;
+let liveAttemptCount = 0;
 
 function setStatus(message, type = 'info') {
   if (!cameraStatus) return;
@@ -30,11 +31,12 @@ async function startCamera() {
 
   stopCamera();
   captureDataUrl = null;
+  liveAttemptCount = 0;
   if (captureInput) captureInput.value = '';
   if (cameraPreview) cameraPreview.src = '';
   if (captureBtn) captureBtn.disabled = true;
   if (retakeBtn) retakeBtn.disabled = true;
-  setStatus('Waiting for camera permission…', 'info');
+  setStatus('Starting camera… Please allow camera permission if prompted.', 'info');
 
   try {
     let streamAttempt = null;
@@ -48,7 +50,6 @@ async function startCamera() {
         audio: false,
       });
     } catch (constraintErr) {
-      // Fallback if specific resolution/facingMode is rejected
       streamAttempt = await navigator.mediaDevices.getUserMedia({
         video: true,
         audio: false,
@@ -57,6 +58,10 @@ async function startCamera() {
     stream = streamAttempt;
 
     if (cameraPreview) {
+      cameraPreview.muted = true;
+      cameraPreview.playsInline = true;
+      cameraPreview.setAttribute('playsinline', '');
+      cameraPreview.setAttribute('webkit-playsinline', '');
       cameraPreview.srcObject = stream;
       await cameraPreview.play();
     }
@@ -68,10 +73,9 @@ async function startCamera() {
 
     if (captureBtn) captureBtn.disabled = false;
 
-    // Check if live scanning should start (e.g. login page)
     if (authForm && authForm.dataset.autoCapture === 'true') {
-      if (scannerBadge) scannerBadge.textContent = 'Scanning live… Align eyes';
-      setStatus('Live Iris Scanner active. Align your face/eyes in the frame—login is hands-free!', 'success');
+      if (scannerBadge) scannerBadge.textContent = 'Live Scanning active…';
+      setStatus('Live Iris Scanner is running hands-free! Align your eyes in the reticle.', 'success');
       startLiveScanner();
     } else {
       setStatus('Camera ready. Position your eye in the frame and capture.', 'success');
@@ -107,7 +111,9 @@ function stopCamera() {
 function startLiveScanner() {
   stopLiveScanner();
   liveScanInFlight = false;
-  liveScanTimer = setInterval(scanCurrentFrame, 650);
+  liveAttemptCount = 0;
+  // Poll live video frame every 550ms
+  liveScanTimer = setInterval(scanCurrentFrame, 550);
 }
 
 function stopLiveScanner() {
@@ -124,9 +130,10 @@ function scanCurrentFrame() {
   }
 
   liveScanInFlight = true;
+  liveAttemptCount += 1;
 
   const canvas = document.createElement('canvas');
-  const maxDim = 1024;
+  const maxDim = 960;
   let w = cameraPreview.videoWidth;
   let h = cameraPreview.videoHeight;
   if (w > maxDim || h > maxDim) {
@@ -165,11 +172,6 @@ function scanCurrentFrame() {
         formData.append('csrfmiddlewaretoken', csrfInput.value);
       }
 
-      const identifierInput = authForm ? authForm.querySelector('input[name="identifier"]') : null;
-      if (identifierInput && identifierInput.value.trim()) {
-        formData.append('identifier', identifierInput.value.trim());
-      }
-
       const targetUrl = (authForm && authForm.action) ? authForm.action : window.location.pathname;
       const response = await fetch(targetUrl, {
         method: 'POST',
@@ -195,16 +197,16 @@ function scanCurrentFrame() {
             cameraPanel.classList.add('matched');
           }
           if (scannerBadge) {
-            scannerBadge.textContent = '✓ Iris Verified!';
+            scannerBadge.textContent = '✓ Verified!';
           }
           setStatus(`Iris verified for ${data.display_name || data.username || 'user'}. Logging in…`, 'success');
           setTimeout(() => {
             window.location.href = data.redirect_url || '/dashboard/';
-          }, 350);
+          }, 300);
           return;
         } else if (data.status === 'retry') {
           if (scannerBadge) {
-            scannerBadge.textContent = 'Scanning live… Keep eyes steady';
+            scannerBadge.textContent = `Scanning live (${liveAttemptCount})… Keep steady`;
           }
         }
       } else if (response.status === 429) {
@@ -277,6 +279,14 @@ function dataURLtoBlob(dataURL) {
 
 if (startCameraBtn) {
   startCameraBtn.addEventListener('click', startCamera);
+}
+
+if (cameraPanel) {
+  cameraPanel.addEventListener('click', () => {
+    if (!stream) {
+      startCamera();
+    }
+  });
 }
 
 if (captureBtn) {

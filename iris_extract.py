@@ -50,10 +50,15 @@ def find_iris(eye_gray):
     """
     h, w = eye_gray.shape
     blur = cv2.GaussianBlur(eye_gray, (9, 9), 2)
-    r_lo, r_hi = int(0.10 * w), int(0.32 * w)
+    r_lo, r_hi = int(0.10 * w), int(0.35 * w)
     circles = cv2.HoughCircles(blur, cv2.HOUGH_GRADIENT, dp=1.2,
                                minDist=w // 8, param1=80, param2=18,
                                minRadius=r_lo, maxRadius=r_hi)
+    if circles is None:
+        # Fallback to lower threshold for soft ambient smartphone lighting
+        circles = cv2.HoughCircles(blur, cv2.HOUGH_GRADIENT, dp=1.2,
+                                   minDist=w // 8, param1=60, param2=14,
+                                   minRadius=r_lo, maxRadius=r_hi)
     yy, xx = np.mgrid[:h, :w]
     best, best_score = None, -1e9
     cands = [] if circles is None else circles[0][:40]
@@ -95,8 +100,13 @@ def find_pupil(eye_gray, iris):
     if not cnts:
         return ix, iy, int(0.35 * ir)
     c = max(cnts, key=cv2.contourArea)
-    (cx, cy), r = cv2.minEnclosingCircle(c)
-    cx, cy = int(cx), int(cy)
+    M = cv2.moments(c)
+    if M["m00"] > 0:
+        cx, cy = int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"])
+    else:
+        (cx, cy), _ = cv2.minEnclosingCircle(c)
+        cx, cy = int(cx), int(cy)
+    _, r = cv2.minEnclosingCircle(c)
     if np.hypot(cx - ix, cy - iy) > 0.3 * ir:
         cx, cy = ix, iy
     r = int(np.clip(r, 0.2 * ir, 0.5 * ir))   # physiological limits

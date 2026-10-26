@@ -481,6 +481,7 @@ def login_view(request):
                 return render(request, 'iris_auth_app/login.html')
 
             user, failure_reason = identify_user_from_iris_result(image, staff_only=False)
+            logger.info("Iris scan result: user=%s, failure_reason=%s, is_ajax=%s", user, failure_reason, is_ajax)
             if user is not None:
                 login(request, user)
                 if is_ajax:
