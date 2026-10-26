@@ -40,6 +40,8 @@ def ensure_iris_template_for_user(
     code_array,
     mask_array,
     *,
+    secondary_code_array=None,
+    secondary_mask_array=None,
     encoding_version=TEMPLATE_ENCODING_VERSION,
 ):
     if not isinstance(user, IrisUser):
@@ -60,6 +62,20 @@ def ensure_iris_template_for_user(
     template, created = IrisTemplate.objects.get_or_create(user=user)
     template.code, code_shape, template.code_dtype = IrisTemplate.serialize_array(code)
     template.mask, mask_shape, template.mask_dtype = IrisTemplate.serialize_array(mask)
+
+    if secondary_code_array is not None and secondary_mask_array is not None:
+        sec_code = np.asarray(secondary_code_array, dtype=np.uint8)
+        sec_mask = np.asarray(secondary_mask_array, dtype=np.uint8)
+        if sec_code.shape == code.shape and sec_mask.shape == mask.shape and sec_mask.any():
+            template.secondary_code, _, _ = IrisTemplate.serialize_array(sec_code)
+            template.secondary_mask, _, _ = IrisTemplate.serialize_array(sec_mask)
+        else:
+            template.secondary_code = None
+            template.secondary_mask = None
+    else:
+        template.secondary_code = None
+        template.secondary_mask = None
+
     template.code_shape = ','.join(str(dimension) for dimension in code_shape)
     template.mask_shape = ','.join(str(dimension) for dimension in mask_shape)
     template.encoding_version = encoding_version
@@ -68,7 +84,7 @@ def ensure_iris_template_for_user(
     return template
 
 
-def compare_templates(code_a, mask_a, code_b, mask_b, max_shift=8):
+def compare_templates(code_a, mask_a, code_b, mask_b, max_shift=16):
     module = load_iris_module()
     if code_a is None or mask_a is None or code_b is None or mask_b is None:
         raise ValidationError('All template arrays are required for comparison.')
@@ -125,6 +141,58 @@ def extract_template_from_image(image_array):
     return code, mask
 
 
+def extract_secondary_template_from_image(image_array):
+    """
+    If multiple eyes are detected in the image (e.g. from an iPhone or mobile camera),
+    extracts the secondary eye template. Returns (code, mask) or (None, None).
+    """
+    module = load_iris_module()
+    try:
+        image = np.asarray(image_array)
+        if image.ndim != 3 or image.shape[2] != 3:
+            return None, None
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        eyes = module.detect_eyes(gray)
+        if len(eyes) < 2:
+            return None, None
+        # Sort by area descending. Primary is eyes[0], secondary is eyes[1]
+        sorted_eyes = sorted(eyes, key=lambda eye: eye[2] * eye[3], reverse=True)
+        x, y, width, height = sorted_eyes[1]
+        padding = int(0.15 * width)
+        eye_region = image[
+            max(0, y - padding):min(image.shape[0], y + height + padding),
+            max(0, x - padding):min(image.shape[1], x + width + padding),
+        ]
+        if eye_region.size == 0:
+            return None, None
+        code, mask = module.process_eye(eye_region, 'capture_secondary', out_dir=None)
+        if code is not None and mask is not None:
+            code = np.asarray(code, dtype=np.uint8)
+            mask = np.asarray(mask, dtype=np.uint8)
+            if code.shape == (256, 512) and mask.shape == (256, 512) and mask.any():
+                return code, mask
+    except Exception:
+        pass
+    return None, None
+
+
+def extract_all_candidate_templates(image_array):
+    """
+    Extracts all viable eye templates from the image.
+    Always includes the primary template from extract_template_from_image(image_array)
+    to preserve 100% compatibility with test mocks.
+    If a secondary eye is detected, includes it as a candidate.
+    """
+    primary_code, primary_mask = extract_template_from_image(image_array)
+    candidates = [(primary_code, primary_mask)]
+
+    sec_code, sec_mask = extract_secondary_template_from_image(image_array)
+    if sec_code is not None and sec_mask is not None:
+        candidates.append((sec_code, sec_mask))
+
+    return candidates
+
+
 def load_user_template(user):
     if not isinstance(user, IrisUser):
         raise ValidationError('A valid user instance is required.')
@@ -160,20 +228,31 @@ def verify_iris_for_user(identifier, image_array, *, threshold=MATCH_THRESHOLD):
         return None
 
     try:
-        stored_code, stored_mask = load_user_template(user)
-        captured_code, captured_mask = extract_template_from_image(image_array)
-        distance = compare_templates(stored_code, stored_mask, captured_code, captured_mask)
+        template = IrisTemplate.objects.filter(user=user).first()
+        if template is None:
+            return None
+        stored_templates = template.get_all_templates()
+        captured_templates = extract_all_candidate_templates(image_array)
+        distances = []
+        for s_code, s_mask in stored_templates:
+            for c_code, c_mask in captured_templates:
+                d = compare_templates(s_code, s_mask, c_code, c_mask)
+                if math.isfinite(float(d)):
+                    distances.append(d)
+        if not distances:
+            return None
+        best_distance = min(distances)
     except (ValidationError, ValueError, TypeError, AttributeError):
         return None
 
-    if math.isfinite(float(distance)) and distance <= threshold:
+    if math.isfinite(float(best_distance)) and best_distance <= threshold:
         return user
     return None
 
 
 def identify_user_from_iris_result(image_array, *, threshold=MATCH_THRESHOLD, staff_only=False):
     _validate_match_inputs(image_array, threshold)
-    captured_code, captured_mask = extract_template_from_image(image_array)
+    captured_templates = extract_all_candidate_templates(image_array)
 
     templates = IrisTemplate.objects.filter(
         enrollment_status='active',
@@ -190,13 +269,21 @@ def identify_user_from_iris_result(image_array, *, threshold=MATCH_THRESHOLD, st
     matches = []
     for template in templates:
         try:
-            stored_code, stored_mask = template.validate_template()
-            distance = compare_templates(
-                stored_code,
-                stored_mask,
-                captured_code,
-                captured_mask,
-            )
+            stored_templates = template.get_all_templates()
+            distances = []
+            for s_code, s_mask in stored_templates:
+                for c_code, c_mask in captured_templates:
+                    d = compare_templates(
+                        s_code,
+                        s_mask,
+                        c_code,
+                        c_mask,
+                    )
+                    if math.isfinite(float(d)):
+                        distances.append(d)
+            if not distances:
+                continue
+            best_distance = min(distances)
         except (ValidationError, ValueError, TypeError, AttributeError):
             logger.warning(
                 'Skipping invalid active iris template id=%s during authentication.',
@@ -205,12 +292,16 @@ def identify_user_from_iris_result(image_array, *, threshold=MATCH_THRESHOLD, st
             )
             continue
 
-        if math.isfinite(float(distance)) and distance <= threshold:
-            matches.append((distance, template.user))
+        if math.isfinite(float(best_distance)) and best_distance <= threshold:
+            matches.append((best_distance, template.user))
 
     if not matches:
         return None, 'no_match'
     if len(matches) > 1:
+        matches.sort(key=lambda m: m[0])
+        # Clear winner check: if lowest distance is noticeably better than second-lowest
+        if matches[0][0] < matches[1][0] - 0.05:
+            return matches[0][1], None
         return None, 'ambiguous'
     return matches[0][1], None
 

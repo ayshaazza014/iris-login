@@ -167,7 +167,7 @@ def encode(enhanced, mask):
     return np.concatenate(bits, 0).astype(np.uint8), np.concatenate(bmask, 0).astype(np.uint8)
 
 
-def hamming(code1, mask1, code2, mask2, max_shift=8):
+def hamming(code1, mask1, code2, mask2, max_shift=16):
     """Normalised Hamming distance with circular shift for rotation tolerance."""
     best = 1.0
     for s in range(-max_shift, max_shift + 1):

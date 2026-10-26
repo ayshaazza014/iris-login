@@ -24,6 +24,16 @@ class IrisTemplate(models.Model):
     )
     code = models.BinaryField(help_text='Serialized iris code bytes.')
     mask = models.BinaryField(help_text='Serialized valid-mask bytes.')
+    secondary_code = models.BinaryField(
+        null=True,
+        blank=True,
+        help_text='Serialized secondary eye code bytes (for dual-eye enrollment).',
+    )
+    secondary_mask = models.BinaryField(
+        null=True,
+        blank=True,
+        help_text='Serialized secondary eye valid-mask bytes (for dual-eye enrollment).',
+    )
     code_shape = models.CharField(max_length=32, default='256,512')
     code_dtype = models.CharField(max_length=16, default='uint8')
     mask_shape = models.CharField(max_length=32, default='256,512')
@@ -66,14 +76,31 @@ class IrisTemplate(models.Model):
         return array
 
     @classmethod
-    def create_for_user(cls, user, code_array, mask_array, *, encoding_version='gabor-v1'):
+    def create_for_user(
+        cls,
+        user,
+        code_array,
+        mask_array,
+        *,
+        secondary_code_array=None,
+        secondary_mask_array=None,
+        encoding_version='gabor-v1',
+    ):
         code_bytes, code_shape, code_dtype = cls.serialize_array(code_array)
         mask_bytes, mask_shape, mask_dtype = cls.serialize_array(mask_array)
+
+        sec_code_bytes = None
+        sec_mask_bytes = None
+        if secondary_code_array is not None and secondary_mask_array is not None:
+            sec_code_bytes, _, _ = cls.serialize_array(secondary_code_array)
+            sec_mask_bytes, _, _ = cls.serialize_array(secondary_mask_array)
 
         return cls.objects.create(
             user=user,
             code=code_bytes,
             mask=mask_bytes,
+            secondary_code=sec_code_bytes,
+            secondary_mask=sec_mask_bytes,
             code_shape=','.join(str(dim) for dim in code_shape),
             code_dtype=code_dtype,
             mask_shape=','.join(str(dim) for dim in mask_shape),
@@ -100,6 +127,27 @@ class IrisTemplate(models.Model):
             raise ValidationError('Template arrays cannot be empty.')
 
         return code, mask
+
+    def get_all_templates(self):
+        """
+        Returns a list of (code, mask) tuples for all enrolled eyes for this user.
+        Always includes the primary eye template, and includes the secondary eye if present.
+        """
+        primary_code, primary_mask = self.validate_template()
+        results = [(primary_code, primary_mask)]
+        if self.secondary_code and self.secondary_mask:
+            try:
+                sec_code = self.deserialize_array(self.secondary_code, self.code_shape, self.code_dtype)
+                sec_mask = self.deserialize_array(self.secondary_mask, self.mask_shape, self.mask_dtype)
+                if (
+                    sec_code.shape == primary_code.shape
+                    and sec_mask.shape == primary_mask.shape
+                    and sec_mask.any()
+                ):
+                    results.append((sec_code, sec_mask))
+            except (ValidationError, ValueError, TypeError):
+                pass
+        return results
 
     def __str__(self):
         return f'Iris template for {self.user.username}'

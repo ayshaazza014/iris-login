@@ -20,6 +20,7 @@ from .models import IrisTemplate, IrisUser
 from .services import (
     TEMPLATE_ENCODING_VERSION,
     ensure_iris_template_for_user,
+    extract_secondary_template_from_image,
     extract_template_from_image,
     identify_user_from_iris_result,
     verify_iris_for_user,
@@ -241,6 +242,7 @@ def register_view(request):
         try:
             image = _decode_capture(uploaded_file)
             code, mask = extract_template_from_image(image)
+            sec_code, sec_mask = extract_secondary_template_from_image(image)
             with transaction.atomic():
                 user = IrisUser.objects.create_user(
                     username=username,
@@ -248,7 +250,13 @@ def register_view(request):
                     student_id=student_id,
                     password=None,
                 )
-                ensure_iris_template_for_user(user, code, mask)
+                ensure_iris_template_for_user(
+                    user,
+                    code,
+                    mask,
+                    secondary_code_array=sec_code,
+                    secondary_mask_array=sec_mask,
+                )
 
             messages.success(request, f'Enrollment successful for {user.display_name}. You can now log in using your iris.')
             return redirect('login')
@@ -338,6 +346,7 @@ def staff_register_view(request):
         try:
             image = _decode_capture(uploaded_file)
             code, mask = extract_template_from_image(image)
+            sec_code, sec_mask = extract_secondary_template_from_image(image)
         except ValidationError as exc:
             messages.error(request, str(exc))
             return render(request, 'iris_auth_app/staff_register.html')
@@ -356,7 +365,13 @@ def staff_register_view(request):
                     is_staff=True,
                     is_superuser=False,
                 )
-                ensure_iris_template_for_user(staff_user, code, mask)
+                ensure_iris_template_for_user(
+                    staff_user,
+                    code,
+                    mask,
+                    secondary_code_array=sec_code,
+                    secondary_mask_array=sec_mask,
+                )
         except ValidationError as exc:
             messages.error(request, str(exc))
             return render(request, 'iris_auth_app/staff_register.html')
@@ -392,13 +407,20 @@ def staff_reenroll_view(request):
         try:
             image = _decode_capture(request.FILES.get('capture'))
             code, mask = extract_template_from_image(image)
+            sec_code, sec_mask = extract_secondary_template_from_image(image)
             with transaction.atomic():
                 student = IrisUser.objects.select_for_update().get(
                     pk=student.pk,
                     is_staff=False,
                     is_superuser=False,
                 )
-                ensure_iris_template_for_user(student, code, mask)
+                ensure_iris_template_for_user(
+                    student,
+                    code,
+                    mask,
+                    secondary_code_array=sec_code,
+                    secondary_mask_array=sec_mask,
+                )
 
             logger.info(f"Staff '{request.user.username}' re-enrolled iris template for student '{student.username}' (id={student.pk}).")
             messages.success(request, f'Iris enrollment updated for {student.display_name or student.username}.')
