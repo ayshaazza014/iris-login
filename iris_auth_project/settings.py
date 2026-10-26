@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/5.0/ref/settings/
 
 import os
 import secrets
+import sys
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
@@ -23,7 +24,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.0/howto/deployment/checklist/
 
-DEBUG = os.environ.get('DJANGO_DEBUG', 'true').lower() == 'true'
+_is_testing = 'test' in sys.argv or 'pytest' in sys.modules or os.environ.get('PYTEST_CURRENT_TEST') is not None
+DEBUG = os.environ.get('DJANGO_DEBUG', 'true' if _is_testing else 'false').lower() == 'true'
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
 if not SECRET_KEY:
     if not DEBUG:
@@ -48,6 +50,16 @@ if not DEBUG:
     SECURE_CONTENT_TYPE_NOSNIFF = True
     SECURE_BROWSER_XSS_FILTER = True
     SECURE_REFERRER_POLICY = 'same-origin'
+    SECURE_SSL_REDIRECT = os.environ.get('DJANGO_SECURE_SSL_REDIRECT', 'true').lower() == 'true'
+    SECURE_HSTS_SECONDS = int(os.environ.get('DJANGO_SECURE_HSTS_SECONDS', '31536000'))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    if os.environ.get('DJANGO_SECURE_PROXY_SSL_HEADER', 'false').lower() == 'true':
+        SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+IRIS_TRUST_PROXY_HEADERS = os.environ.get('IRIS_TRUST_PROXY_HEADERS', 'false').lower() in ('true', '1')
+IRIS_ALLOW_OPEN_REGISTRATION = os.environ.get('IRIS_ALLOW_OPEN_REGISTRATION', 'true').lower() in ('true', '1')
+IRIS_REQUIRE_1_TO_1_IDENTIFIER = os.environ.get('IRIS_REQUIRE_1_TO_1_IDENTIFIER', 'false').lower() in ('true', '1')
 
 AUTH_USER_MODEL = 'iris_auth_app.IrisUser'
 LOGIN_URL = 'login'

@@ -1,4 +1,4 @@
-Django==5.0.14
+Django==5.2.18
 numpy>=2.0.0,<3
 opencv-python==4.10.0.84
 pytest==9.1.1

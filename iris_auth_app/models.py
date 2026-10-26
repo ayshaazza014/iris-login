@@ -38,7 +38,7 @@ class IrisTemplate(models.Model):
     code_dtype = models.CharField(max_length=16, default='uint8')
     mask_shape = models.CharField(max_length=32, default='256,512')
     mask_dtype = models.CharField(max_length=16, default='uint8')
-    encoding_version = models.CharField(max_length=64, default='gabor-v1')
+    encoding_version = models.CharField(max_length=64, default='gabor-eye-crop-v2')
     enrollment_status = models.CharField(
         max_length=20,
         choices=[('pending', 'Pending'), ('active', 'Active'), ('rejected', 'Rejected')],
@@ -52,7 +52,10 @@ class IrisTemplate(models.Model):
         if not shape_value:
             return ()
         normalized_shape = str(shape_value).strip().strip('()[]')
-        return tuple(int(part.strip()) for part in normalized_shape.split(',') if part.strip())
+        try:
+            return tuple(int(part.strip()) for part in normalized_shape.split(',') if part.strip())
+        except (ValueError, TypeError) as exc:
+            raise ValidationError(f'Invalid template shape format: {shape_value}') from exc
 
     @staticmethod
     def serialize_array(array):

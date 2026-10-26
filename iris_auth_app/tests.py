@@ -969,3 +969,97 @@ class SecurityAndAuthenticationHardeningTests(TestCase):
         self.assertTrue(IrisUser.objects.filter(username='alice').exists())
         self.assertTrue(IrisUser.objects.filter(username='bob').exists())
         self.assertTrue(IrisUser.objects.filter(username='staff_alice', is_staff=True).exists())
+
+    def test_get_client_ip_spoofing_defense(self):
+        from iris_auth_app.views import get_client_ip
+        from django.test import RequestFactory
+        factory = RequestFactory()
+
+        # By default, X-Forwarded-For is ignored to prevent IP spoofing
+        req = factory.get('/', HTTP_X_FORWARDED_FOR='198.51.100.1, 10.0.0.1', REMOTE_ADDR='203.0.113.5')
+        self.assertEqual(get_client_ip(req), '203.0.113.5')
+
+        # When trusted proxy flag is enabled, last hop is used
+        with self.settings(IRIS_TRUST_PROXY_HEADERS=True):
+            req2 = factory.get('/', HTTP_X_FORWARDED_FOR='198.51.100.1, 198.51.100.2', REMOTE_ADDR='10.0.0.2')
+            self.assertEqual(get_client_ip(req2), '198.51.100.2')
+
+    def test_rate_limiter_evicts_stale_records(self):
+        import time
+        from iris_auth_app.views import InMemoryRateLimiter
+        limiter = InMemoryRateLimiter(max_attempts=5, window_seconds=1)
+        limiter.is_limited('key_a')
+        self.assertIn('key_a', limiter._records)
+
+        # Force time elapsed
+        limiter._records['key_a'] = [time.time() - 10]
+        limiter._last_cleanup = 0  # force cleanup threshold
+        limiter.is_limited('key_b')
+        self.assertNotIn('key_a', limiter._records)
+        self.assertIn('key_b', limiter._records)
+
+    def test_parse_shape_raises_validation_error(self):
+        with self.assertRaises(ValidationError):
+            IrisTemplate._parse_shape('invalid,shape,letters')
+
+    def test_seed_users_demo_flag(self):
+        call_command('seed_users', '--demo')
+        alice = IrisUser.objects.filter(username='alice').first()
+        self.assertIsNotNone(alice)
+
+    def test_evaluate_management_command(self):
+        import os, tempfile
+        with tempfile.NamedTemporaryFile(suffix='.md', delete=False) as tmp:
+            tmp_path = tmp.name
+        try:
+            call_command('evaluate', '--quick', '--output-report', tmp_path)
+            self.assertTrue(os.path.exists(tmp_path))
+            with open(tmp_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            self.assertIn('Evaluation Report', content)
+            self.assertIn('Hamming distance', content)
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    def test_require_1_to_1_identifier_setting(self):
+        with self.settings(IRIS_REQUIRE_1_TO_1_IDENTIFIER=True):
+            response = self.client.post('/login/', {'capture': make_capture()})
+            self.assertEqual(response.status_code, 200)
+            self.assertContains(response, 'An account identifier')
+
+    def test_allow_open_registration_setting(self):
+        with self.settings(IRIS_ALLOW_OPEN_REGISTRATION=False):
+            response = self.client.post('/register/', {
+                'username': 'newuser',
+                'display_name': 'New User',
+                'student_id': 'S-9999',
+                'capture': make_capture(),
+            })
+            self.assertEqual(response.status_code, 200)
+            self.assertContains(response, 'Self-service registration is disabled')
+
+    def test_coerce_uint8_array_bounds(self):
+        from iris_auth_app.services import _coerce_uint8_array
+        arr = np.array([0, 128, 255], dtype=np.int32)
+        coerced = _coerce_uint8_array(arr)
+        self.assertEqual(coerced.dtype, np.uint8)
+
+        with self.assertRaises(ValidationError):
+            _coerce_uint8_array(np.array([-1, 100], dtype=np.int32))
+        with self.assertRaises(ValidationError):
+            _coerce_uint8_array(np.array([256, 100], dtype=np.int32))
+
+    def test_secondary_discard_logging(self):
+        from iris_auth_app.services import ensure_iris_template_for_user
+        student = IrisUser.objects.create_user(username='sec_test_user')
+        code = np.zeros((8, 64), dtype=np.uint8)
+        mask = np.ones((8, 64), dtype=np.uint8)
+        with patch('iris_auth_app.services.logger.info') as mock_info:
+            template = ensure_iris_template_for_user(
+                student, code, mask,
+                secondary_code_array=np.zeros((4, 4), dtype=np.uint8),
+                secondary_mask_array=np.ones((4, 4), dtype=np.uint8),
+            )
+            self.assertIsNone(template.secondary_code)
+            mock_info.assert_called()

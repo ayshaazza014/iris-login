@@ -11,6 +11,13 @@ from iris_auth_app.services import ensure_iris_template_for_user, extract_templa
 class Command(BaseCommand):
     help = 'Create sample user accounts and enroll demo iris templates for development.'
 
+    def add_arguments(self, parser):
+        parser.add_argument(
+            '--demo',
+            action='store_true',
+            help='Enroll sample synthetic biometric templates for local testing/demo only.',
+        )
+
     def handle(self, *args, **options):
         sample_users = [
             {'username': 'alice', 'display_name': 'Alice Demo', 'student_id': 'S-1001', 'password': 'DemoPass123!', 'is_staff': False},
@@ -35,8 +42,19 @@ class Command(BaseCommand):
             else:
                 self.stdout.write(self.style.WARNING(f'Already exists: {user.username}'))
 
-        # Enroll synthetic_eye.png for alice if not already enrolled
+        # Gate synthetic enrollment behind settings.DEBUG or explicit --demo flag
+        allow_demo_enrollment = getattr(settings, 'DEBUG', False) or options.get('demo')
         synthetic_path = Path(settings.BASE_DIR) / 'synthetic_eye.png'
+
+        if not allow_demo_enrollment:
+            self.stdout.write(
+                self.style.WARNING(
+                    'SECURITY NOTICE: Non-debug environment detected. Skipping synthetic biometric enrollment.\n'
+                    'Pass --demo explicitly if setting up an isolated test/demo environment.'
+                )
+            )
+            return
+
         if synthetic_path.exists():
             alice = IrisUser.objects.filter(username='alice').first()
             if alice and not getattr(alice, 'iris_template', None):
@@ -45,6 +63,11 @@ class Command(BaseCommand):
                     if img is not None:
                         code, mask = extract_template_from_image(img)
                         ensure_iris_template_for_user(alice, code, mask)
-                        self.stdout.write(self.style.SUCCESS('Enrolled synthetic_eye.png template for alice.'))
+                        self.stdout.write(
+                            self.style.WARNING(
+                                'SECURITY WARNING: Enrolled demo synthetic template for alice. '
+                                'Do not deploy with seeded accounts or demo credentials!'
+                            )
+                        )
                 except Exception as exc:
                     self.stdout.write(self.style.WARNING(f'Could not enroll synthetic template: {exc}'))

@@ -37,6 +37,15 @@ def load_iris_module():
     return _iris_module
 
 
+def _coerce_uint8_array(arr, name='array'):
+    a = np.asarray(arr)
+    if a.dtype != np.uint8:
+        if ((a < 0) | (a > 255)).any():
+            raise ValidationError(f'Template {name} values are out of bounds for uint8 (0..255).')
+        a = a.astype(np.uint8)
+    return a
+
+
 def ensure_iris_template_for_user(
     user,
     code_array,
@@ -51,8 +60,8 @@ def ensure_iris_template_for_user(
     if code_array is None or mask_array is None:
         raise ValidationError('Both code and mask arrays are required.')
 
-    code = np.asarray(code_array, dtype=np.uint8)
-    mask = np.asarray(mask_array, dtype=np.uint8)
+    code = _coerce_uint8_array(code_array, 'code')
+    mask = _coerce_uint8_array(mask_array, 'mask')
 
     if code.shape != mask.shape:
         raise ValidationError('Code and mask shapes must match.')
@@ -66,12 +75,13 @@ def ensure_iris_template_for_user(
     template.mask, mask_shape, template.mask_dtype = IrisTemplate.serialize_array(mask)
 
     if secondary_code_array is not None and secondary_mask_array is not None:
-        sec_code = np.asarray(secondary_code_array, dtype=np.uint8)
-        sec_mask = np.asarray(secondary_mask_array, dtype=np.uint8)
+        sec_code = _coerce_uint8_array(secondary_code_array, 'secondary_code')
+        sec_mask = _coerce_uint8_array(secondary_mask_array, 'secondary_mask')
         if sec_code.shape == code.shape and sec_mask.shape == mask.shape and sec_mask.any():
             template.secondary_code, _, _ = IrisTemplate.serialize_array(sec_code)
             template.secondary_mask, _, _ = IrisTemplate.serialize_array(sec_mask)
         else:
+            logger.info("Secondary iris template discarded: shape/mask mismatch or empty mask for user '%s'.", user.username)
             template.secondary_code = None
             template.secondary_mask = None
     else:
@@ -91,10 +101,10 @@ def compare_templates(code_a, mask_a, code_b, mask_b, max_shift=20):
     if code_a is None or mask_a is None or code_b is None or mask_b is None:
         raise ValidationError('All template arrays are required for comparison.')
 
-    code_a = np.asarray(code_a, dtype=np.uint8)
-    mask_a = np.asarray(mask_a, dtype=np.uint8)
-    code_b = np.asarray(code_b, dtype=np.uint8)
-    mask_b = np.asarray(mask_b, dtype=np.uint8)
+    code_a = _coerce_uint8_array(code_a, 'code_a')
+    mask_a = _coerce_uint8_array(mask_a, 'mask_a')
+    code_b = _coerce_uint8_array(code_b, 'code_b')
+    mask_b = _coerce_uint8_array(mask_b, 'mask_b')
 
     if code_a.shape != code_b.shape or code_a.shape != mask_a.shape or code_b.shape != mask_b.shape:
         raise ValidationError('Template shapes must match for comparison.')
@@ -136,6 +146,8 @@ def extract_template_from_image(image_array):
                 code = np.asarray(code, dtype=np.uint8)
                 mask = np.asarray(mask, dtype=np.uint8)
                 if code.shape == (256, 512) and mask.shape == (256, 512) and mask.any():
+                    if (mask.sum() / mask.size) < 0.20:
+                        raise ValidationError('Iris image quality is insufficient (excessive eyelid occlusion or glare).')
                     return code, mask
         except (cv2.error, OSError, ValueError, TypeError) as exc:
             last_error = exc
@@ -312,6 +324,7 @@ def identify_user_from_iris_result(image_array, *, threshold=MATCH_THRESHOLD, st
 
 
 def identify_user_from_iris(image_array, *, threshold=MATCH_THRESHOLD, staff_only=False):
+    """Public convenience helper resolving IrisUser directly from an image capture (BUG-020)."""
     user, _reason = identify_user_from_iris_result(
         image_array,
         threshold=threshold,

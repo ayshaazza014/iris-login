@@ -7,6 +7,7 @@ import time
 
 import cv2
 import numpy as np
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login, logout
 from django.contrib.auth.decorators import login_required
@@ -42,6 +43,9 @@ class InMemoryRateLimiter:
     """
     Sliding window in-memory rate limiter per IP / action
     to mitigate DoS / brute-force floods of CPU-intensive OpenCV calls.
+
+    Note: In multi-worker deployments (e.g. Gunicorn/uWSGI), each worker has its own
+    process-local memory. For production multi-process clusters, back with Redis or cache.
     """
 
     def __init__(self, max_attempts=DEFAULT_RATE_LIMIT_ATTEMPTS, window_seconds=DEFAULT_RATE_LIMIT_WINDOW):
@@ -49,6 +53,22 @@ class InMemoryRateLimiter:
         self.window_seconds = window_seconds
         self._records = collections.defaultdict(list)
         self._lock = threading.Lock()
+        self._last_cleanup = time.time()
+
+    def _cleanup_expired(self, now):
+        """Evict stale keys to prevent unbounded memory growth."""
+        if (now - self._last_cleanup < 60) and len(self._records) < 500:
+            return
+        self._last_cleanup = now
+        stale_keys = []
+        for key, timestamps in list(self._records.items()):
+            valid = [t for t in timestamps if t > now - self.window_seconds]
+            if not valid:
+                stale_keys.append(key)
+            else:
+                self._records[key] = valid
+        for key in stale_keys:
+            self._records.pop(key, None)
 
     def is_limited(self, key, max_attempts=None, window_seconds=None):
         limit = max_attempts if max_attempts is not None else self.max_attempts
@@ -56,6 +76,7 @@ class InMemoryRateLimiter:
         now = time.time()
         cutoff = now - window
         with self._lock:
+            self._cleanup_expired(now)
             timestamps = self._records[key]
             valid = [t for t in timestamps if t > cutoff]
             if len(valid) >= limit:
@@ -68,15 +89,25 @@ class InMemoryRateLimiter:
     def clear(self):
         with self._lock:
             self._records.clear()
+            self._last_cleanup = time.time()
 
 
 _rate_limiter = InMemoryRateLimiter()
 
 
 def get_client_ip(request):
-    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-    if x_forwarded_for:
-        return x_forwarded_for.split(',')[0].strip()
+    """
+    Extract client IP address. To prevent header spoofing (BUG-001), X-Forwarded-For
+    is only inspected if IRIS_TRUST_PROXY_HEADERS is explicitly enabled in settings,
+    in which case the last hop (closest to reverse proxy) is used.
+    """
+    trust_proxy = getattr(settings, 'IRIS_TRUST_PROXY_HEADERS', False) or (
+        os.environ.get('IRIS_TRUST_PROXY_HEADERS', 'false').lower() in ('1', 'true', 'yes')
+    )
+    if trust_proxy:
+        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+        if x_forwarded_for:
+            return x_forwarded_for.split(',')[-1].strip()
     return request.META.get('REMOTE_ADDR', '127.0.0.1')
 
 
@@ -211,6 +242,11 @@ def register_view(request):
     if request.method == 'POST':
         if is_rate_limited(request, action='register'):
             return HttpResponse('Too many attempts. Please try again later.', status=429)
+
+        # Check authorized enrollment policy (BUG-015 / TRD FR-05)
+        if not getattr(settings, 'IRIS_ALLOW_OPEN_REGISTRATION', True) and not (request.user.is_authenticated and request.user.is_staff):
+            messages.error(request, 'Self-service registration is disabled. Contact staff for authorized enrollment.')
+            return render(request, 'iris_auth_app/register.html')
 
         username = request.POST.get('username', '').strip()
         display_name = request.POST.get('display_name', '').strip()
@@ -408,6 +444,8 @@ def staff_reenroll_view(request):
             image = _decode_capture(request.FILES.get('capture'))
             code, mask = extract_template_from_image(image)
             sec_code, sec_mask = extract_secondary_template_from_image(image)
+            # Note on BUG-023: select_for_update() provides row-level locking on Postgres/MySQL;
+            # on SQLite (dev default), atomic() provides database-level transaction locking.
             with transaction.atomic():
                 student = IrisUser.objects.select_for_update().get(
                     pk=student.pk,
@@ -446,17 +484,30 @@ def login_view(request):
         )
 
         if not getattr(request, '_rate_limited_checked', False):
-            max_attempts = 180 if is_ajax else None
+            # Budget AJAX live-scans at 60 attempts/60s (max 1/s) and standard POSTs at DEFAULT_RATE_LIMIT_ATTEMPTS (30/60s)
+            max_attempts = 60 if is_ajax else None
             if is_rate_limited(request, action='login', max_attempts=max_attempts):
                 if is_ajax:
-                    return JsonResponse(
+                    resp = JsonResponse(
                         {'status': 'rate_limited', 'message': 'Too many live scan attempts. Pausing briefly...'},
                         status=429,
                     )
-                return HttpResponse('Too many attempts. Please try again later.', status=429)
+                    resp['Retry-After'] = '5'
+                    return resp
+                resp = HttpResponse('Too many attempts. Please try again later.', status=429)
+                resp['Retry-After'] = '5'
+                return resp
 
         identifier = request.POST.get('identifier', '').strip()
         uploaded_file = request.FILES.get('capture')
+
+        # Enforce 1:1 identifier check if configured (BUG-006 / TRD FR-07)
+        if getattr(settings, 'IRIS_REQUIRE_1_TO_1_IDENTIFIER', False) and not identifier:
+            msg = 'An account identifier (username or student ID) is required for 1:1 biometric verification.'
+            if is_ajax:
+                return JsonResponse({'status': 'retry', 'message': msg})
+            messages.error(request, msg)
+            return render(request, 'iris_auth_app/login.html')
 
         try:
             image = _decode_capture(uploaded_file)
@@ -481,7 +532,9 @@ def login_view(request):
                 return render(request, 'iris_auth_app/login.html')
 
             user, failure_reason = identify_user_from_iris_result(image, staff_only=False)
-            logger.info("Iris scan result: user=%s, failure_reason=%s, is_ajax=%s", user, failure_reason, is_ajax)
+            logger.info("Iris scan evaluated: matched=%s, failure_reason=%s, is_ajax=%s", bool(user), failure_reason, is_ajax)
+            if user is not None:
+                logger.debug("Iris scan successfully matched user_id=%s", user.pk)
             if user is not None:
                 login(request, user)
                 if is_ajax:
@@ -518,7 +571,9 @@ def login_view(request):
 @require_http_methods(["POST"])
 def verify_iris(request):
     if is_rate_limited(request, action='verify_iris'):
-        return HttpResponse('Too many attempts. Please try again later.', status=429)
+        resp = HttpResponse('Too many attempts. Please try again later.', status=429)
+        resp['Retry-After'] = '5'
+        return resp
     request._rate_limited_checked = True
     return login_view(request)
 

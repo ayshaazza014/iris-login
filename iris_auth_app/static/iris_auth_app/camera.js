@@ -112,8 +112,8 @@ function startLiveScanner() {
   stopLiveScanner();
   liveScanInFlight = false;
   liveAttemptCount = 0;
-  // Poll live video frame every 550ms
-  liveScanTimer = setInterval(scanCurrentFrame, 550);
+  // Poll live video frame every 1200ms to throttle CPU load and respect rate budgets
+  liveScanTimer = setInterval(scanCurrentFrame, 1200);
 }
 
 function stopLiveScanner() {
@@ -201,7 +201,13 @@ function scanCurrentFrame() {
           }
           setStatus(`Iris verified for ${data.display_name || data.username || 'user'}. Logging in…`, 'success');
           setTimeout(() => {
-            window.location.href = data.redirect_url || '/dashboard/';
+            const redirectUrl = data.redirect_url || '/dashboard/';
+            // Allowlist relative path redirect to prevent open redirect vulnerabilities (BUG-022)
+            if (typeof redirectUrl === 'string' && redirectUrl.startsWith('/') && !redirectUrl.startsWith('//')) {
+              window.location.href = redirectUrl;
+            } else {
+              window.location.href = '/dashboard/';
+            }
           }, 300);
           return;
         } else if (data.status === 'retry') {
@@ -210,8 +216,11 @@ function scanCurrentFrame() {
           }
         }
       } else if (response.status === 429) {
-        if (scannerBadge) scannerBadge.textContent = 'Rate limit cooling…';
-        await new Promise((resolve) => setTimeout(resolve, 1500));
+        const retryHeader = response.headers.get('Retry-After');
+        const retrySec = retryHeader ? parseInt(retryHeader, 10) : 5;
+        const backoffMs = Math.max(retrySec * 1000, 3000);
+        if (scannerBadge) scannerBadge.textContent = `Rate limited. Pausing ${Math.round(backoffMs / 1000)}s…`;
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
       }
     } catch (err) {
       // Non-fatal network glitch; continue scanning

@@ -6,6 +6,19 @@ import sys
 
 def main():
     """Run administrative tasks."""
+    # Opportunistically load .env for local management commands if present
+    env_file = os.path.join(os.path.dirname(__file__), '.env')
+    if os.path.exists(env_file):
+        try:
+            with open(env_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        k, v = line.split('=', 1)
+                        os.environ.setdefault(k.strip(), v.strip().strip('"\''))
+        except OSError:
+            pass
+
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'iris_auth_project.settings')
     try:
         from django.core.management import execute_from_command_line
