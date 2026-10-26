@@ -770,7 +770,7 @@ class SecurityAndAuthenticationHardeningTests(TestCase):
 
             os.environ.pop('DJANGO_ALLOWED_HOSTS', None)
             importlib.reload(project_settings)
-            self.assertEqual(project_settings.ALLOWED_HOSTS, ['localhost', '127.0.0.1', '[::1]'])
+            self.assertEqual(project_settings.ALLOWED_HOSTS, ['localhost', '127.0.0.1', '[::1]', 'testserver'])
         finally:
             if orig_env is not None:
                 os.environ['DJANGO_ALLOWED_HOSTS'] = orig_env
