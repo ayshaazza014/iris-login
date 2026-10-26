@@ -117,28 +117,31 @@ def extract_template_from_image(image_array):
     if not eyes:
         raise ValidationError('No eye was detected in the image. Move closer, face the camera, and try again.')
 
-    x, y, width, height = max(eyes, key=lambda eye: eye[2] * eye[3])
-    padding = int(0.15 * width)
-    eye_region = image[
-        max(0, y - padding):min(image.shape[0], y + height + padding),
-        max(0, x - padding):min(image.shape[1], x + width + padding),
-    ]
-    if eye_region.size == 0:
-        raise ValidationError('The detected eye region is invalid.')
+    sorted_eyes = sorted(eyes, key=lambda eye: eye[2] * eye[3], reverse=True)
+    last_error = None
+    for eye in sorted_eyes:
+        x, y, width, height = eye
+        padding = int(0.15 * width)
+        eye_region = image[
+            max(0, y - padding):min(image.shape[0], y + height + padding),
+            max(0, x - padding):min(image.shape[1], x + width + padding),
+        ]
+        if eye_region.size == 0:
+            continue
+        try:
+            code, mask = module.process_eye(eye_region, 'capture', out_dir=None)
+            if code is not None and mask is not None:
+                code = np.asarray(code, dtype=np.uint8)
+                mask = np.asarray(mask, dtype=np.uint8)
+                if code.shape == (256, 512) and mask.shape == (256, 512) and mask.any():
+                    return code, mask
+        except (cv2.error, OSError, ValueError, TypeError) as exc:
+            last_error = exc
+            continue
 
-    try:
-        code, mask = module.process_eye(eye_region, 'capture', out_dir=None)
-    except (cv2.error, OSError, ValueError, TypeError) as exc:
-        raise ValidationError('Iris feature extraction failed. Improve lighting and capture the eye again.') from exc
-
-    if code is None or mask is None:
-        raise ValidationError('Iris feature extraction failed to produce a code and mask. Please capture again.')
-    code = np.asarray(code, dtype=np.uint8)
-    mask = np.asarray(mask, dtype=np.uint8)
-    if code.size == 0 or mask.size == 0 or code.shape != mask.shape or not mask.any():
-        raise ValidationError('Iris feature extraction produced an unusable template. Improve lighting and capture again.')
-
-    return code, mask
+    if last_error:
+        raise ValidationError('Iris feature extraction failed. Improve lighting and capture the eye again.') from last_error
+    raise ValidationError('Iris feature extraction produced an unusable template. Improve lighting and capture again.')
 
 
 def extract_secondary_template_from_image(image_array):
