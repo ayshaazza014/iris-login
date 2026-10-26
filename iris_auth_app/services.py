@@ -1,3 +1,4 @@
+import os
 import importlib.util
 import logging
 import math
@@ -12,7 +13,7 @@ from .models import IrisTemplate, IrisUser
 
 logger = logging.getLogger(__name__)
 MODULE_PATH = Path(__file__).resolve().parents[1] / 'iris_extract.py'
-MATCH_THRESHOLD = 0.32
+MATCH_THRESHOLD = float(os.environ.get('IRIS_MATCH_THRESHOLD', '0.35'))
 TEMPLATE_ENCODING_VERSION = 'gabor-eye-crop-v2'
 
 _iris_module = None
@@ -84,7 +85,7 @@ def ensure_iris_template_for_user(
     return template
 
 
-def compare_templates(code_a, mask_a, code_b, mask_b, max_shift=16):
+def compare_templates(code_a, mask_a, code_b, mask_b, max_shift=20):
     module = load_iris_module()
     if code_a is None or mask_a is None or code_b is None or mask_b is None:
         raise ValidationError('All template arrays are required for comparison.')

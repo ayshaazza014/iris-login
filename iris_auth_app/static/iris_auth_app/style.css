@@ -339,6 +339,7 @@ input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible
 }
 
 .camera-panel {
+  position: relative;
   background: #0f1330;
   border: 1px solid rgba(255,255,255,0.08);
   border-radius: 18px;
@@ -348,6 +349,88 @@ input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible
   justify-content: center;
   overflow: hidden;
   margin-top: 18px;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.camera-panel.scanning {
+  border-color: rgba(0, 242, 254, 0.45);
+  box-shadow: 0 0 24px rgba(0, 242, 254, 0.22);
+}
+
+.scanner-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.camera-panel.scanning .scanner-overlay,
+.camera-panel.matched .scanner-overlay {
+  display: flex;
+}
+
+.scanner-reticle {
+  width: 78%;
+  max-width: 360px;
+  height: 55%;
+  max-height: 170px;
+  border: 2px dashed rgba(0, 242, 254, 0.75);
+  border-radius: 20px;
+  box-shadow: 0 0 18px rgba(0, 242, 254, 0.25);
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+.camera-panel.matched .scanner-reticle {
+  border: 3px solid #10b981;
+  box-shadow: 0 0 28px rgba(16, 185, 129, 0.6);
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.scanner-reticle::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, #00f2fe, #4facfe, transparent);
+  box-shadow: 0 0 10px #00f2fe;
+  animation: scanSweep 2s ease-in-out infinite;
+}
+
+.camera-panel.matched .scanner-reticle::before {
+  display: none;
+}
+
+@keyframes scanSweep {
+  0% { top: 0%; opacity: 0.85; }
+  50% { top: 100%; opacity: 1; }
+  100% { top: 0%; opacity: 0.85; }
+}
+
+.scanner-badge {
+  font-size: 0.85rem;
+  font-weight: 700;
+  background: rgba(15, 19, 48, 0.88);
+  color: #00f2fe;
+  padding: 6px 16px;
+  border-radius: 999px;
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(0, 242, 254, 0.4);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  transition: all 0.2s ease;
+}
+
+.camera-panel.matched .scanner-badge {
+  background: #10b981;
+  color: #ffffff;
+  border-color: #10b981;
+  box-shadow: 0 4px 16px rgba(16, 185, 129, 0.4);
 }
 
 .camera-panel video {

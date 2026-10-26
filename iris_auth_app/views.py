@@ -12,7 +12,7 @@ from django.contrib.auth import login, logout
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_http_methods
 
@@ -439,8 +439,20 @@ def staff_reenroll_view(request):
 @require_http_methods(["GET", "POST"])
 def login_view(request):
     if request.method == 'POST':
+        is_ajax = (
+            request.headers.get('x-requested-with') == 'XMLHttpRequest'
+            or 'application/json' in request.headers.get('accept', '')
+            or request.POST.get('ajax') == 'true'
+        )
+
         if not getattr(request, '_rate_limited_checked', False):
-            if is_rate_limited(request, action='login'):
+            max_attempts = 180 if is_ajax else None
+            if is_rate_limited(request, action='login', max_attempts=max_attempts):
+                if is_ajax:
+                    return JsonResponse(
+                        {'status': 'rate_limited', 'message': 'Too many live scan attempts. Pausing briefly...'},
+                        status=429,
+                    )
                 return HttpResponse('Too many attempts. Please try again later.', status=429)
 
         identifier = request.POST.get('identifier', '').strip()
@@ -452,26 +464,50 @@ def login_view(request):
                 user = verify_iris_for_user(identifier, image)
                 if user is not None and not user.is_staff and not user.is_superuser and user.is_active:
                     login(request, user)
+                    if is_ajax:
+                        return JsonResponse({
+                            'status': 'success',
+                            'redirect_url': '/dashboard/',
+                            'username': user.username,
+                            'display_name': user.display_name or user.username,
+                        })
                     messages.success(request, f'Iris verification succeeded for {user.display_name or user.username}.')
                     return redirect('dashboard')
 
-                messages.error(request, _iris_login_failure_message('no_match', staff_only=False))
+                msg = _iris_login_failure_message('no_match', staff_only=False)
+                if is_ajax:
+                    return JsonResponse({'status': 'retry', 'message': msg})
+                messages.error(request, msg)
                 return render(request, 'iris_auth_app/login.html')
 
             user, failure_reason = identify_user_from_iris_result(image, staff_only=False)
             if user is not None:
                 login(request, user)
+                if is_ajax:
+                    return JsonResponse({
+                        'status': 'success',
+                        'redirect_url': '/dashboard/',
+                        'username': user.username,
+                        'display_name': user.display_name or user.username,
+                    })
                 messages.success(request, f'Iris verification succeeded for {user.display_name or user.username}.')
                 return redirect('dashboard')
 
-            messages.error(request, _iris_login_failure_message(failure_reason, staff_only=False))
+            msg = _iris_login_failure_message(failure_reason, staff_only=False)
+            if is_ajax:
+                return JsonResponse({'status': 'retry', 'message': msg})
+            messages.error(request, msg)
             return render(request, 'iris_auth_app/login.html')
 
         except ValidationError as exc:
+            if is_ajax:
+                return JsonResponse({'status': 'retry', 'message': str(exc)})
             messages.error(request, str(exc))
             return render(request, 'iris_auth_app/login.html')
         except (cv2.error, ImportError, OSError, TypeError, ValueError, AttributeError):
             logger.exception('Unexpected error while processing an iris login.')
+            if is_ajax:
+                return JsonResponse({'status': 'retry', 'message': 'Scan processing issue. Retrying...'})
             messages.error(request, 'An unexpected error occurred while processing the iris image.')
             return render(request, 'iris_auth_app/login.html')
 

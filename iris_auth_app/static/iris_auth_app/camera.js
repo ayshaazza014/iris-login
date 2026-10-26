@@ -1,14 +1,20 @@
 const cameraStatus = document.getElementById('camera-status');
 const cameraPreview = document.getElementById('camera-preview');
+const cameraPanel = document.getElementById('camera-panel');
+const scannerOverlay = document.getElementById('scanner-overlay');
+const scannerBadge = document.getElementById('scanner-badge');
 const startCameraBtn = document.getElementById('start-camera');
 const captureBtn = document.getElementById('capture-image');
 const retakeBtn = document.getElementById('retake-image');
+const manualScanBtn = document.getElementById('manual-scan-btn');
 const captureInput = document.getElementById('capture');
 const authForm = document.getElementById('auth-form');
 
 let stream = null;
 let captureDataUrl = null;
 let isSubmitting = false;
+let liveScanTimer = null;
+let liveScanInFlight = false;
 
 function setStatus(message, type = 'info') {
   if (!cameraStatus) return;
@@ -34,11 +40,15 @@ async function startCamera() {
     let streamAttempt = null;
     try {
       streamAttempt = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user' },
+        video: {
+          facingMode: 'user',
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
         audio: false,
       });
     } catch (constraintErr) {
-      // Graceful fallback for mobile or browsers that reject the facingMode constraint
+      // Fallback if specific resolution/facingMode is rejected
       streamAttempt = await navigator.mediaDevices.getUserMedia({
         video: true,
         audio: false,
@@ -51,12 +61,21 @@ async function startCamera() {
       await cameraPreview.play();
     }
 
-    const trackSettings = stream.getVideoTracks()[0]?.getSettings();
-    const dimensions = trackSettings?.width && trackSettings?.height
-      ? ` (${trackSettings.width} × ${trackSettings.height})`
-      : '';
-    setStatus(`Camera ready${dimensions}. Position your eye in the frame and capture.`, 'success');
+    if (cameraPanel) {
+      cameraPanel.classList.remove('matched');
+      cameraPanel.classList.add('scanning');
+    }
+
     if (captureBtn) captureBtn.disabled = false;
+
+    // Check if live scanning should start (e.g. login page)
+    if (authForm && authForm.dataset.autoCapture === 'true') {
+      if (scannerBadge) scannerBadge.textContent = 'Scanning live… Align eyes';
+      setStatus('Live Iris Scanner active. Align your face/eyes in the frame—login is hands-free!', 'success');
+      startLiveScanner();
+    } else {
+      setStatus('Camera ready. Position your eye in the frame and capture.', 'success');
+    }
   } catch (error) {
     stopCamera();
     const message = error.name === 'NotAllowedError'
@@ -69,6 +88,8 @@ async function startCamera() {
 }
 
 function stopCamera() {
+  stopLiveScanner();
+
   if (stream) {
     stream.getTracks().forEach((track) => track.stop());
     stream = null;
@@ -77,6 +98,125 @@ function stopCamera() {
   if (cameraPreview) {
     cameraPreview.srcObject = null;
   }
+
+  if (cameraPanel && !isSubmitting) {
+    cameraPanel.classList.remove('scanning');
+  }
+}
+
+function startLiveScanner() {
+  stopLiveScanner();
+  liveScanInFlight = false;
+  liveScanTimer = setInterval(scanCurrentFrame, 650);
+}
+
+function stopLiveScanner() {
+  if (liveScanTimer) {
+    clearInterval(liveScanTimer);
+    liveScanTimer = null;
+  }
+  liveScanInFlight = false;
+}
+
+function scanCurrentFrame() {
+  if (!stream || !cameraPreview || !cameraPreview.videoWidth || isSubmitting || liveScanInFlight) {
+    return;
+  }
+
+  liveScanInFlight = true;
+
+  const canvas = document.createElement('canvas');
+  const maxDim = 1024;
+  let w = cameraPreview.videoWidth;
+  let h = cameraPreview.videoHeight;
+  if (w > maxDim || h > maxDim) {
+    if (w > h) {
+      h = Math.round(h * (maxDim / w));
+      w = maxDim;
+    } else {
+      w = Math.round(w * (maxDim / h));
+      h = maxDim;
+    }
+  }
+  canvas.width = w;
+  canvas.height = h;
+
+  const context = canvas.getContext('2d');
+  if (!context) {
+    liveScanInFlight = false;
+    return;
+  }
+
+  context.drawImage(cameraPreview, 0, 0, w, h);
+
+  canvas.toBlob(async (blob) => {
+    if (!blob || !stream || isSubmitting) {
+      liveScanInFlight = false;
+      return;
+    }
+
+    try {
+      const formData = new FormData();
+      formData.append('capture', blob, 'live_iris.png');
+      formData.append('ajax', 'true');
+
+      const csrfInput = authForm ? authForm.querySelector('input[name="csrfmiddlewaretoken"]') : null;
+      if (csrfInput) {
+        formData.append('csrfmiddlewaretoken', csrfInput.value);
+      }
+
+      const identifierInput = authForm ? authForm.querySelector('input[name="identifier"]') : null;
+      if (identifierInput && identifierInput.value.trim()) {
+        formData.append('identifier', identifierInput.value.trim());
+      }
+
+      const targetUrl = (authForm && authForm.action) ? authForm.action : window.location.pathname;
+      const response = await fetch(targetUrl, {
+        method: 'POST',
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          'Accept': 'application/json',
+        },
+        body: formData,
+      });
+
+      if (!stream) {
+        liveScanInFlight = false;
+        return;
+      }
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.status === 'success') {
+          isSubmitting = true;
+          stopCamera();
+          if (cameraPanel) {
+            cameraPanel.classList.remove('scanning');
+            cameraPanel.classList.add('matched');
+          }
+          if (scannerBadge) {
+            scannerBadge.textContent = '✓ Iris Verified!';
+          }
+          setStatus(`Iris verified for ${data.display_name || data.username || 'user'}. Logging in…`, 'success');
+          setTimeout(() => {
+            window.location.href = data.redirect_url || '/dashboard/';
+          }, 350);
+          return;
+        } else if (data.status === 'retry') {
+          if (scannerBadge) {
+            scannerBadge.textContent = 'Scanning live… Keep eyes steady';
+          }
+        }
+      } else if (response.status === 429) {
+        if (scannerBadge) scannerBadge.textContent = 'Rate limit cooling…';
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+      }
+    } catch (err) {
+      // Non-fatal network glitch; continue scanning
+    } finally {
+      liveScanInFlight = false;
+    }
+  }, 'image/png');
 }
 
 function captureFrame() {
@@ -94,6 +234,7 @@ function captureFrame() {
     setStatus('Could not capture an image. Please restart the camera and try again.', 'error');
     return false;
   }
+
   try {
     context.drawImage(cameraPreview, 0, 0, canvas.width, canvas.height);
     captureDataUrl = canvas.toDataURL('image/png');
@@ -206,13 +347,12 @@ if (authForm) {
 
     if (!captureInput || !captureInput.files.length) {
       event.preventDefault();
-      setStatus('Choose an iris image or capture one with the camera before continuing.', 'error');
+      setStatus('Choose an iris image or start the live camera before continuing.', 'error');
       return;
     }
 
     isSubmitting = true;
-    setStatus('Processing your iris. Please wait…', 'info');
-    const submitButton = authForm.querySelector('button[type="submit"]');
+    setStatus('Processing iris verification. Please wait…', 'info');
     if (submitButton) {
       if (!submitButton.dataset.originalText) {
         submitButton.dataset.originalText = submitButton.textContent;
