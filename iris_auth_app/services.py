@@ -13,7 +13,8 @@ from .models import IrisTemplate, IrisUser
 
 logger = logging.getLogger(__name__)
 MODULE_PATH = Path(__file__).resolve().parents[1] / 'iris_extract.py'
-MATCH_THRESHOLD = float(os.environ.get('IRIS_MATCH_THRESHOLD', '0.38'))
+MATCH_THRESHOLD = float(os.environ.get('IRIS_MATCH_THRESHOLD', '0.32'))
+VERIFICATION_THRESHOLD = float(os.environ.get('IRIS_VERIFICATION_THRESHOLD', '0.35'))
 TEMPLATE_ENCODING_VERSION = 'gabor-eye-crop-v2'
 
 _iris_module = None
@@ -220,7 +221,7 @@ def _validate_match_inputs(image_array, threshold):
         raise ValidationError('The iris matching threshold must be between 0 and 1.')
 
 
-def verify_iris_for_user(identifier, image_array, *, threshold=MATCH_THRESHOLD):
+def verify_iris_for_user(identifier, image_array, *, threshold=VERIFICATION_THRESHOLD):
     if not identifier:
         raise ValidationError('A username or student ID is required.')
     _validate_match_inputs(image_array, threshold)

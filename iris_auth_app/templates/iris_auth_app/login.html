@@ -10,7 +10,7 @@
     <div class="form-header">
         <span class="section-eyebrow">SMARTCAMPUS STUDENT PORTAL</span>
         <h2 class="auth-title">Student Login</h2>
-        <p class="auth-subtitle">Verify your identity securely using iris authentication.</p>
+        <p class="auth-subtitle">Verify your identity securely with 1:1 iris verification or live scan.</p>
     </div>
 
     {% if messages %}
@@ -23,6 +23,11 @@
 
     <form id="auth-form" method="post" enctype="multipart/form-data" class="form-grid" data-auto-capture="true">
         {% csrf_token %}
+
+        <div class="input-group">
+            <label for="identifier">Username or Student ID (1:1 Verification)</label>
+            <input id="identifier" type="text" name="identifier" placeholder="e.g. ree or ahad (for 1:1 verification)" autocomplete="off">
+        </div>
 
         <div class="camera-panel" id="camera-panel">
             <video id="camera-preview" autoplay playsinline webkit-playsinline muted width="100%" height="260"></video>
