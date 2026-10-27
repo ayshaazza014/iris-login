@@ -1,7 +1,15 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 
-from .models import IrisTemplate, IrisUser
+from .models import (
+    Assessment,
+    AttendanceRecord,
+    FeeRecord,
+    InternalMark,
+    IrisTemplate,
+    IrisUser,
+    TimetableEntry,
+)
 
 
 class IrisTemplateInline(admin.StackedInline):
@@ -82,3 +90,38 @@ class IrisTemplateAdmin(admin.ModelAdmin):
         'mask_dtype',
         'encoding_version',
     )
+
+
+@admin.register(AttendanceRecord)
+class AttendanceRecordAdmin(admin.ModelAdmin):
+    list_display = ('student', 'subject', 'attended_classes', 'total_classes', 'updated_at')
+    list_filter = ('subject',)
+    search_fields = ('student__username', 'student__student_id', 'subject')
+
+
+@admin.register(FeeRecord)
+class FeeRecordAdmin(admin.ModelAdmin):
+    list_display = ('student', 'fee_type', 'amount_due', 'amount_paid', 'outstanding_balance', 'due_date')
+    list_filter = ('fee_type',)
+    search_fields = ('student__username', 'student__student_id', 'fee_type')
+
+
+@admin.register(TimetableEntry)
+class TimetableEntryAdmin(admin.ModelAdmin):
+    list_display = ('student', 'day', 'start_time', 'end_time', 'subject', 'room', 'faculty')
+    list_filter = ('day', 'subject')
+    search_fields = ('student__username', 'student__student_id', 'subject', 'faculty')
+
+
+@admin.register(Assessment)
+class AssessmentAdmin(admin.ModelAdmin):
+    list_display = ('student', 'title', 'subject', 'assessment_type', 'due_date', 'submitted')
+    list_filter = ('assessment_type', 'subject', 'submitted')
+    search_fields = ('student__username', 'student__student_id', 'title', 'subject')
+
+
+@admin.register(InternalMark)
+class InternalMarkAdmin(admin.ModelAdmin):
+    list_display = ('student', 'subject', 'exam_type', 'obtained_marks', 'max_marks', 'percentage')
+    list_filter = ('subject', 'exam_type')
+    search_fields = ('student__username', 'student__student_id', 'subject')

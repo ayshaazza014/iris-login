@@ -1,0 +1,43 @@
+{% extends 'iris_auth_app/base.html' %}
+{% block title %}Timetable | SmartCampus{% endblock %}
+{% block content %}
+<section class="dashboard-shell">
+    <header class="dashboard-header">
+        <div>
+            <span class="section-eyebrow">STUDENT PORTAL</span>
+            <h1>Weekly Timetable</h1>
+            <p>Class schedule for {{ user.display_name|default:user.username }}.</p>
+        </div>
+        <a href="{% url 'dashboard' %}" class="secondary-btn">Back to Dashboard</a>
+    </header>
+    <article class="future-panel">
+        {% for day, entries in timetable_by_day.items %}
+            <h3 style="margin-top:18px;">{% if day == 'Mon' %}Monday{% elif day == 'Tue' %}Tuesday{% elif day == 'Wed' %}Wednesday{% elif day == 'Thu' %}Thursday{% elif day == 'Fri' %}Friday{% elif day == 'Sat' %}Saturday{% else %}{{ day }}{% endif %}</h3>
+            {% if entries %}
+            <table style="width:100%; border-collapse: collapse;">
+                <thead>
+                    <tr style="text-align:left; border-bottom:1px solid var(--campus-border);">
+                        <th style="padding:10px;">Time</th>
+                        <th style="padding:10px;">Subject</th>
+                        <th style="padding:10px;">Room</th>
+                        <th style="padding:10px;">Faculty</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for entry in entries %}
+                    <tr style="border-bottom:1px solid var(--campus-border);">
+                        <td style="padding:10px;">{{ entry.start_time }} - {{ entry.end_time }}</td>
+                        <td style="padding:10px;">{{ entry.subject }}</td>
+                        <td style="padding:10px;">{{ entry.room|default:"-" }}</td>
+                        <td style="padding:10px;">{{ entry.faculty|default:"-" }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p>No classes scheduled.</p>
+            {% endif %}
+        {% endfor %}
+    </article>
+</section>
+{% endblock %}

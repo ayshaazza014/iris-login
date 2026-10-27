@@ -3,7 +3,9 @@ const cameraPreview = document.getElementById('camera-preview');
 const cameraPanel = document.getElementById('camera-panel');
 const scannerOverlay = document.getElementById('scanner-overlay');
 const scannerBadge = document.getElementById('scanner-badge');
+const scannerFrameText = document.getElementById('scanner-frame-text');
 const startCameraBtn = document.getElementById('start-camera');
+const stopCameraBtn = document.getElementById('stop-camera');
 const captureBtn = document.getElementById('capture-image');
 const retakeBtn = document.getElementById('retake-image');
 const manualScanBtn = document.getElementById('manual-scan-btn');
@@ -17,15 +19,27 @@ let liveScanTimer = null;
 let liveScanInFlight = false;
 let liveAttemptCount = 0;
 
-function setStatus(message, type = 'info') {
+function setStatus(message, type = 'idle') {
   if (!cameraStatus) return;
-  cameraStatus.textContent = message;
-  cameraStatus.className = `message-box ${type}`;
+  cameraStatus.style.display = 'none';
+}
+
+function updateButtonStates(running) {
+  if (startCameraBtn) {
+    startCameraBtn.style.display = running ? 'none' : 'inline-flex';
+  }
+  if (stopCameraBtn) {
+    stopCameraBtn.style.display = running ? 'inline-flex' : 'none';
+  }
+  if (manualScanBtn) {
+    manualScanBtn.disabled = !running;
+  }
 }
 
 async function startCamera() {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    setStatus('This browser does not support camera access.', 'error');
+    setStatus('Camera access is blocked. Allow camera permission in your browser and try again.', 'camera-blocked');
+    updateButtonStates(false);
     return;
   }
 
@@ -36,7 +50,8 @@ async function startCamera() {
   if (cameraPreview) cameraPreview.src = '';
   if (captureBtn) captureBtn.disabled = true;
   if (retakeBtn) retakeBtn.disabled = true;
-  setStatus('Starting camera… Please allow camera permission if prompted.', 'info');
+  updateButtonStates(false);
+  setStatus('Press Start Live Camera to begin.', 'idle');
 
   try {
     let streamAttempt = null;
@@ -68,26 +83,34 @@ async function startCamera() {
 
     if (cameraPanel) {
       cameraPanel.classList.remove('matched');
-      cameraPanel.classList.add('scanning');
+      cameraPanel.classList.remove('camera-off');
+      cameraPanel.classList.add('camera-ready');
+      cameraPanel.classList.remove('scanning');
     }
+    if (scannerFrameText) {
+    scannerFrameText.style.display = 'none';
+  }
 
     if (captureBtn) captureBtn.disabled = false;
 
+    updateButtonStates(true);
     if (authForm && authForm.dataset.autoCapture === 'true') {
       if (scannerBadge) scannerBadge.textContent = 'Live Scanning active…';
-      setStatus('Live Iris Scanner is running hands-free! Align your eyes in the reticle.', 'success');
+      setStatus('Camera is on. Center your eye in the frame, then press Scan Iris.', 'camera-ready');
       startLiveScanner();
+      if (cameraPanel) cameraPanel.classList.add('scanning');
     } else {
-      setStatus('Camera ready. Position your eye in the frame and capture.', 'success');
+      setStatus('Camera is on. Center your eye in the frame, then press Scan Iris.', 'camera-ready');
     }
   } catch (error) {
     stopCamera();
     const message = error.name === 'NotAllowedError'
-      ? 'Camera permission was denied. Allow camera access in your browser settings and try again.'
+      ? 'Camera access is blocked. Allow camera permission in your browser and try again.'
       : error.name === 'NotFoundError'
         ? 'No camera was found. Connect or enable a camera and try again.'
-        : 'Camera access failed. Check that the camera is connected and not being used by another app.';
-    setStatus(message, 'error');
+        : 'Camera access is blocked. Allow camera permission in your browser and try again.';
+    setStatus(message, 'camera-blocked');
+    updateButtonStates(false);
   }
 }
 
@@ -105,6 +128,17 @@ function stopCamera() {
 
   if (cameraPanel && !isSubmitting) {
     cameraPanel.classList.remove('scanning');
+    cameraPanel.classList.remove('camera-ready');
+    cameraPanel.classList.remove('matched');
+    cameraPanel.classList.add('camera-off');
+  }
+  if (scannerFrameText) {
+    scannerFrameText.style.display = 'none';
+  }
+
+  updateButtonStates(false);
+  if (!isSubmitting) {
+    setStatus('Camera is off. Press Start Live Camera to begin.', 'idle');
   }
 }
 
@@ -191,7 +225,7 @@ function scanCurrentFrame() {
         const data = await response.json();
         if (data.status === 'success') {
           isSubmitting = true;
-          stopCamera();
+          stopLiveScanner();
           if (cameraPanel) {
             cameraPanel.classList.remove('scanning');
             cameraPanel.classList.add('matched');
@@ -199,10 +233,9 @@ function scanCurrentFrame() {
           if (scannerBadge) {
             scannerBadge.textContent = '✓ Verified!';
           }
-          setStatus(`Iris verified for ${data.display_name || data.username || 'user'}. Logging in…`, 'success');
+          setStatus('Identity verified. Redirecting.', 'success');
           setTimeout(() => {
             const redirectUrl = data.redirect_url || '/dashboard/';
-            // Allowlist relative path redirect to prevent open redirect vulnerabilities (BUG-022)
             if (typeof redirectUrl === 'string' && redirectUrl.startsWith('/') && !redirectUrl.startsWith('//')) {
               window.location.href = redirectUrl;
             } else {
@@ -211,16 +244,23 @@ function scanCurrentFrame() {
           }, 300);
           return;
         } else if (data.status === 'retry') {
+          if (cameraPanel) cameraPanel.classList.add('scanning');
+          if (scannerFrameText) scannerFrameText.style.display = 'none';
+          setStatus('Scanning. Hold still.', 'scanning');
           if (scannerBadge) {
-            scannerBadge.textContent = `Scanning live (${liveAttemptCount})… Keep steady`;
+            scannerBadge.textContent = 'Scanning live';
           }
         }
       } else if (response.status === 429) {
         const retryHeader = response.headers.get('Retry-After');
         const retrySec = retryHeader ? parseInt(retryHeader, 10) : 5;
         const backoffMs = Math.max(retrySec * 1000, 3000);
+        setStatus('Scanning. Hold still.', 'scanning');
         if (scannerBadge) scannerBadge.textContent = `Rate limited. Pausing ${Math.round(backoffMs / 1000)}s…`;
         await new Promise((resolve) => setTimeout(resolve, backoffMs));
+      } else {
+        if (cameraPanel) cameraPanel.classList.add('scanning');
+        setStatus('Scanning. Hold still.', 'scanning');
       }
     } catch (err) {
       // Non-fatal network glitch; continue scanning
@@ -290,6 +330,20 @@ if (startCameraBtn) {
   startCameraBtn.addEventListener('click', startCamera);
 }
 
+if (stopCameraBtn) {
+  stopCameraBtn.addEventListener('click', () => {
+    stopCamera();
+    updateButtonStates(false);
+    setStatus('Camera is off. Press Start Live Camera to begin.', 'idle');
+    if (cameraPanel) {
+      cameraPanel.classList.add('camera-off');
+      cameraPanel.classList.remove('camera-ready');
+      cameraPanel.classList.remove('scanning');
+    }
+    if (scannerFrameText) scannerFrameText.style.display = 'flex';
+  });
+}
+
 if (cameraPanel) {
   cameraPanel.addEventListener('click', () => {
     if (!stream) {
@@ -357,6 +411,19 @@ if (authForm) {
       return;
     }
 
+    if (authForm.dataset.autoCapture === 'true') {
+      if (!stream) {
+        event.preventDefault();
+        setStatus('Camera is off. Press Start Live Camera to begin.', 'idle');
+        updateButtonStates(false);
+        return;
+      }
+      if (manualScanBtn) manualScanBtn.disabled = true;
+      setStatus('Scanning. Hold still.', 'scanning');
+      if (cameraPanel) cameraPanel.classList.add('scanning');
+      return;
+    }
+
     if (authForm.dataset.autoCapture === 'true' && (!captureInput || !captureInput.files.length)) {
       if (!captureFrame()) {
         event.preventDefault();
@@ -366,12 +433,14 @@ if (authForm) {
 
     if (!captureInput || !captureInput.files.length) {
       event.preventDefault();
-      setStatus('Choose an iris image or start the live camera before continuing.', 'error');
+      setStatus('Start the live camera to scan your iris.', 'idle');
       return;
     }
 
     isSubmitting = true;
-    setStatus('Processing iris verification. Please wait…', 'info');
+    setStatus('Scanning. Hold still.', 'scanning');
+    if (cameraPanel) cameraPanel.classList.add('scanning');
+    if (scannerFrameText) scannerFrameText.style.display = 'none';
     if (submitButton) {
       if (!submitButton.dataset.originalText) {
         submitButton.dataset.originalText = submitButton.textContent;
@@ -402,4 +471,13 @@ window.addEventListener('pageshow', () => {
       }
     }
   }
+  updateButtonStates(false);
+  if (cameraPanel) {
+    cameraPanel.classList.add('camera-off');
+    cameraPanel.classList.remove('camera-ready');
+    cameraPanel.classList.remove('scanning');
+    cameraPanel.classList.remove('matched');
+  }
+  if (scannerFrameText) scannerFrameText.style.display = 'none';
+  setStatus('Camera is off. Press Start Live Camera to begin.', 'idle');
 });

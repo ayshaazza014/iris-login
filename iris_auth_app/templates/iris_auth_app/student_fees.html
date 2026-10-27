@@ -1,0 +1,47 @@
+{% extends 'iris_auth_app/base.html' %}
+{% block title %}Fee Structure | SmartCampus{% endblock %}
+{% block content %}
+<section class="dashboard-shell">
+    <header class="dashboard-header">
+        <div>
+            <span class="section-eyebrow">STUDENT PORTAL</span>
+            <h1>Fee Structure</h1>
+            <p>Fee details, payments, and outstanding balances.</p>
+        </div>
+        <a href="{% url 'dashboard' %}" class="secondary-btn">Back to Dashboard</a>
+    </header>
+    <article class="future-panel">
+        <div class="dashboard-grid" style="margin-bottom:16px;">
+            <article class="metric"><div class="metric-label">Total Due</div><div class="metric-value">₹{{ total_due }}</div></article>
+            <article class="metric"><div class="metric-label">Total Paid</div><div class="metric-value">₹{{ total_paid }}</div></article>
+            <article class="metric"><div class="metric-label">Outstanding</div><div class="metric-value">₹{{ total_outstanding }}</div></article>
+        </div>
+        {% if records %}
+        <table style="width:100%; border-collapse: collapse;">
+            <thead>
+                <tr style="text-align:left; border-bottom:1px solid var(--campus-border);">
+                    <th style="padding:10px;">Fee Type</th>
+                    <th style="padding:10px;">Amount Due</th>
+                    <th style="padding:10px;">Amount Paid</th>
+                    <th style="padding:10px;">Outstanding</th>
+                    <th style="padding:10px;">Due Date</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for record in records %}
+                <tr style="border-bottom:1px solid var(--campus-border);">
+                    <td style="padding:10px;">{{ record.fee_type }}</td>
+                    <td style="padding:10px;">₹{{ record.amount_due }}</td>
+                    <td style="padding:10px;">₹{{ record.amount_paid }}</td>
+                    <td style="padding:10px;">₹{{ record.outstanding_balance }}</td>
+                    <td style="padding:10px;">{% if record.due_date %}{{ record.due_date }}{% else %}-{% endif %}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p>No fee records available yet.</p>
+        {% endif %}
+    </article>
+</section>
+{% endblock %}

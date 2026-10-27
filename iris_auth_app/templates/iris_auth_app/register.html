@@ -1,16 +1,16 @@
 {% extends 'iris_auth_app/base.html' %}
 {% load static %}
 
-{% block title %}Student Registration | SmartCampus{% endblock %}
+{% block title %}Register | SmartCampus{% endblock %}
 
 {% block messages %}{% endblock %}
 
 {% block content %}
 <div class="form-card auth-page">
     <div class="form-header">
-        <span class="section-eyebrow">SMARTCAMPUS STUDENT PORTAL</span>
+        <span class="section-eyebrow">SMARTCAMPUS REGISTRATION</span>
         <h2 class="auth-title">Create Your SmartCampus Account</h2>
-        <p class="auth-subtitle">Add your student details, then enroll your iris using an image upload or camera capture.</p>
+        <p class="auth-subtitle">Choose your role, complete the details, and enroll your iris using an image upload or camera capture.</p>
     </div>
 
     {% if messages %}
@@ -24,18 +24,43 @@
     <form id="auth-form" method="post" enctype="multipart/form-data" class="form-grid">
         {% csrf_token %}
         <div class="input-group">
+            <label for="role">Register As</label>
+            <select id="role" name="role" required>
+                <option value="student" selected>Student</option>
+                <option value="staff">Staff</option>
+            </select>
+        </div>
+
+        <div class="input-group">
             <label for="username">Username</label>
-            <input id="username" type="text" name="username" autocomplete="username" placeholder="student_001" required>
+            <input id="username" type="text" name="username" autocomplete="username" placeholder="e.g. student_001 or staff_001" required>
         </div>
 
         <div class="input-group">
             <label for="display_name">Display name</label>
-            <input id="display_name" type="text" name="display_name" autocomplete="name" placeholder="Student One" required>
+            <input id="display_name" type="text" name="display_name" autocomplete="name" placeholder="Full Name" required>
         </div>
 
-        <div class="input-group">
-            <label for="student_id">Student ID</label>
-            <input id="student_id" type="text" name="student_id" placeholder="S-1001" required>
+        <div id="student-fields">
+            <div class="input-group">
+                <label for="student_id">Student ID</label>
+                <input id="student_id" type="text" name="student_id" placeholder="S-1001">
+            </div>
+        </div>
+
+        <div id="staff-fields" style="display:none;">
+            <div class="input-group">
+                <label for="employee_id">Employee ID</label>
+                <input id="employee_id" type="text" name="employee_id" placeholder="E-1001">
+            </div>
+            <div class="input-group">
+                <label for="department">Department</label>
+                <input id="department" type="text" name="department" placeholder="e.g. Administration">
+            </div>
+            <div class="input-group">
+                <label for="email">Email (optional)</label>
+                <input id="email" type="email" name="email" autocomplete="email" placeholder="staff@example.com">
+            </div>
         </div>
 
         <div class="camera-panel">
@@ -55,10 +80,38 @@
 
         <div class="form-actions">
             <button type="submit" class="primary-btn">Create Account &amp; Enroll Iris</button>
-            <a href="{% url 'login' %}" class="secondary-btn">Already have an account?</a>
+            <a href="{% url 'login' %}" class="secondary-btn">Student Login</a>
+            <a href="{% url 'staff_login' %}" class="secondary-btn">Staff Login</a>
         </div>
     </form>
 </div>
 
 <script src="{% static 'iris_auth_app/camera.js' %}"></script>
+<script>
+    const roleSelect = document.getElementById('role');
+    const studentFields = document.getElementById('student-fields');
+    const staffFields = document.getElementById('staff-fields');
+    const studentIdInput = document.getElementById('student_id');
+    const employeeIdInput = document.getElementById('employee_id');
+
+    function toggleRoleFields() {
+        if (!roleSelect) return;
+        if (roleSelect.value === 'staff') {
+            studentFields.style.display = 'none';
+            staffFields.style.display = 'block';
+            if (studentIdInput) studentIdInput.removeAttribute('required');
+            if (employeeIdInput) employeeIdInput.removeAttribute('required');
+        } else {
+            studentFields.style.display = 'block';
+            staffFields.style.display = 'none';
+            if (studentIdInput) studentIdInput.setAttribute('required', 'required');
+            if (employeeIdInput) employeeIdInput.removeAttribute('required');
+        }
+    }
+
+    if (roleSelect) {
+        roleSelect.addEventListener('change', toggleRoleFields);
+    }
+    toggleRoleFields();
+</script>
 {% endblock %}

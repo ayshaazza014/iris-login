@@ -10,7 +10,7 @@
     <div class="form-header">
         <span class="section-eyebrow">SMARTCAMPUS STUDENT PORTAL</span>
         <h2 class="auth-title">Student Login</h2>
-        <p class="auth-subtitle">Verify your identity securely with 1:1 iris verification or live scan.</p>
+        <p class="auth-subtitle">Verify your identity securely using iris authentication.</p>
     </div>
 
     {% if messages %}
@@ -19,36 +19,37 @@
         {% endfor %}
     {% endif %}
 
-    <div id="camera-status" class="message-box info" role="status" aria-live="polite">Choose an iris image below, or optionally use the camera.</div>
-
     <form id="auth-form" method="post" enctype="multipart/form-data" class="form-grid" data-auto-capture="true">
         {% csrf_token %}
 
         <div class="input-group">
-            <label for="identifier">Username or Student ID (1:1 Verification)</label>
-            <input id="identifier" type="text" name="identifier" placeholder="e.g. username or student ID (for 1:1 verification)" autocomplete="off">
+            <label for="identifier">Username or Student ID</label>
+            <input id="identifier" type="text" name="identifier" placeholder="Enter username or student ID" autocomplete="off">
         </div>
 
-        <div class="camera-panel" id="camera-panel">
-            <video id="camera-preview" autoplay playsinline webkit-playsinline muted width="100%" height="260"></video>
-            <div class="scanner-overlay" id="scanner-overlay" aria-hidden="true">
-                <div class="scanner-reticle" id="scanner-reticle"></div>
-                <span class="scanner-badge" id="scanner-badge">Live Scanner Ready</span>
+        <div class="camera-panel camera-off" id="camera-panel">
+            <div class="scanner-frame">
+                <video id="camera-preview" autoplay playsinline webkit-playsinline muted></video>
+                <div class="scanner-frame-overlay" aria-hidden="true">
+                    <span class="scanner-corner tl"></span>
+                    <span class="scanner-corner tr"></span>
+                    <span class="scanner-corner bl"></span>
+                    <span class="scanner-corner br"></span>
+                    <span class="scanner-ring"></span>
+                    <span class="scanner-line"></span>
+                </div>
             </div>
         </div>
 
+        <div id="camera-status" class="scanner-status idle" role="status" aria-live="polite" style="display:none;"></div>
+
         <div class="form-actions">
             <button type="button" id="start-camera" class="primary-btn">Start Live Camera</button>
-            <button type="submit" id="manual-scan-btn" class="secondary-btn">Scan Iris</button>
-        </div>
-
-        <div class="input-group">
-            <label for="capture">Iris image (PNG or JPEG)</label>
-            <input id="capture" type="file" name="capture" accept="image/png,image/jpeg" required>
+            <button type="button" id="stop-camera" class="stop-link" style="display:none;">Stop camera</button>
+            <button type="submit" id="manual-scan-btn" class="primary-btn" disabled>Scan Iris</button>
         </div>
 
         <div class="form-actions">
-            <a href="{% url 'register' %}" class="secondary-btn">Register</a>
             <a href="{% url 'home' %}" class="text-link">Back to welcome page</a>
         </div>
     </form>

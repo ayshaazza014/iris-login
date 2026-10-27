@@ -1,0 +1,40 @@
+{% extends 'iris_auth_app/base.html' %}
+{% block title %}Attendance | SmartCampus{% endblock %}
+{% block content %}
+<section class="dashboard-shell">
+    <header class="dashboard-header">
+        <div>
+            <span class="section-eyebrow">STUDENT PORTAL</span>
+            <h1>Attendance</h1>
+            <p>Subject-wise attendance records for {{ user.display_name|default:user.username }}.</p>
+        </div>
+        <a href="{% url 'dashboard' %}" class="secondary-btn">Back to Dashboard</a>
+    </header>
+    <article class="future-panel">
+        {% if records %}
+        <table style="width:100%; border-collapse: collapse;">
+            <thead>
+                <tr style="text-align:left; border-bottom:1px solid var(--campus-border);">
+                    <th style="padding:10px;">Subject</th>
+                    <th style="padding:10px;">Attended</th>
+                    <th style="padding:10px;">Total Classes</th>
+                    <th style="padding:10px;">Percentage</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for record in records %}
+                <tr style="border-bottom:1px solid var(--campus-border);">
+                    <td style="padding:10px;">{{ record.subject }}</td>
+                    <td style="padding:10px;">{{ record.attended_classes }}</td>
+                    <td style="padding:10px;">{{ record.total_classes }}</td>
+                    <td style="padding:10px;">{{ record.attendance_percentage }}%</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p>No attendance records available yet.</p>
+        {% endif %}
+    </article>
+</section>
+{% endblock %}

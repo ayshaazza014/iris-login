@@ -16,6 +16,136 @@ class IrisUser(AbstractUser):
         super().save(*args, **kwargs)
 
 
+class AttendanceRecord(models.Model):
+    student = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='attendance_records',
+    )
+    subject = models.CharField(max_length=120)
+    total_classes = models.PositiveIntegerField(default=0)
+    attended_classes = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [('student', 'subject')]
+        ordering = ['subject']
+
+    def attendance_percentage(self):
+        if self.total_classes == 0:
+            return 0.0
+        return round((self.attended_classes / self.total_classes) * 100.0, 2)
+
+    def __str__(self):
+        return f'{self.student.username} - {self.subject}: {self.attended_classes}/{self.total_classes}'
+
+
+class FeeRecord(models.Model):
+    student = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='fee_records',
+    )
+    fee_type = models.CharField(max_length=120)
+    amount_due = models.DecimalField(max_digits=10, decimal_places=2)
+    amount_paid = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    due_date = models.DateField(blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['fee_type']
+
+    def outstanding_balance(self):
+        balance = self.amount_due - self.amount_paid
+        if balance < 0:
+            balance = 0
+        return balance
+
+    def __str__(self):
+        return f'{self.student.username} - {self.fee_type}: {self.amount_paid}/{self.amount_due}'
+
+
+class TimetableEntry(models.Model):
+    DAY_CHOICES = [
+        ('Mon', 'Monday'),
+        ('Tue', 'Tuesday'),
+        ('Wed', 'Wednesday'),
+        ('Thu', 'Thursday'),
+        ('Fri', 'Friday'),
+        ('Sat', 'Saturday'),
+    ]
+
+    student = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='timetable_entries',
+    )
+    day = models.CharField(max_length=3, choices=DAY_CHOICES)
+    start_time = models.TimeField()
+    end_time = models.TimeField()
+    subject = models.CharField(max_length=120)
+    room = models.CharField(max_length=64, blank=True)
+    faculty = models.CharField(max_length=120, blank=True)
+
+    class Meta:
+        ordering = ['day', 'start_time']
+
+    def __str__(self):
+        return f'{self.student.username} - {self.day} {self.start_time} {self.subject}'
+
+
+class Assessment(models.Model):
+    TYPE_CHOICES = [
+        ('Assignment', 'Assignment'),
+        ('Project', 'Project'),
+        ('Lab', 'Lab'),
+        ('Quiz', 'Quiz'),
+    ]
+
+    student = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='assessments',
+    )
+    title = models.CharField(max_length=200)
+    subject = models.CharField(max_length=120)
+    assessment_type = models.CharField(max_length=20, choices=TYPE_CHOICES)
+    due_date = models.DateField(blank=True, null=True)
+    description = models.TextField(blank=True)
+    submitted = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ['due_date', 'subject']
+
+    def __str__(self):
+        return f'{self.student.username} - {self.title} ({self.assessment_type})'
+
+
+class InternalMark(models.Model):
+    student = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='internal_marks',
+    )
+    subject = models.CharField(max_length=120)
+    exam_type = models.CharField(max_length=80, default='Internal')
+    max_marks = models.PositiveIntegerField(default=100)
+    obtained_marks = models.FloatField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [('student', 'subject', 'exam_type')]
+        ordering = ['subject', 'exam_type']
+
+    def percentage(self):
+        if self.max_marks == 0:
+            return 0.0
+        return round((self.obtained_marks / self.max_marks) * 100.0, 2)
+
+    def __str__(self):
+        return f'{self.student.username} - {self.subject} {self.exam_type}: {self.obtained_marks}/{self.max_marks}'
+
+
 class IrisTemplate(models.Model):
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,

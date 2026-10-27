@@ -42,9 +42,15 @@
                 </article>
             </div>
             <section class="future-panel">
-                <div><span class="section-eyebrow">CAMPUS SERVICES</span><h2>More for your campus day</h2></div>
-                <p>Attendance, timetable, announcements, and academic services are not yet available in this prototype.</p>
-                <div class="future-tags"><span>Attendance · Planned</span><span>Timetable · Planned</span><span>Announcements · Planned</span></div>
+                <div><span class="section-eyebrow">CAMPUS SERVICES</span><h2>Your personalized portal</h2></div>
+                <p>Access your attendance, fee structure, timetable, assessments, and internal marks.</p>
+                <div class="cta-row">
+                    <a href="{% url 'student_attendance' %}" class="primary-btn">Attendance</a>
+                    <a href="{% url 'student_fees' %}" class="secondary-btn">Fees</a>
+                    <a href="{% url 'student_timetable' %}" class="secondary-btn">Timetable</a>
+                    <a href="{% url 'student_assessments' %}" class="secondary-btn">Assessments</a>
+                    <a href="{% url 'student_internal_marks' %}" class="secondary-btn">Internal Marks</a>
+                </div>
             </section>
         </div>
     </div>

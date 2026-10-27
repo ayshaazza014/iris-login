@@ -243,70 +243,142 @@ def register_view(request):
         if is_rate_limited(request, action='register'):
             return HttpResponse('Too many attempts. Please try again later.', status=429)
 
-        # Check authorized enrollment policy (BUG-015 / TRD FR-05)
-        if not getattr(settings, 'IRIS_ALLOW_OPEN_REGISTRATION', True) and not (request.user.is_authenticated and request.user.is_staff):
-            messages.error(request, 'Self-service registration is disabled. Contact staff for authorized enrollment.')
-            return render(request, 'iris_auth_app/register.html')
-
+        role = request.POST.get('role', 'student').strip().lower()
         username = request.POST.get('username', '').strip()
         display_name = request.POST.get('display_name', '').strip()
-        student_id = request.POST.get('student_id', '').strip()
         uploaded_file = request.FILES.get('capture')
 
-        if not username or not display_name or not student_id:
-            messages.error(request, 'Please complete all account fields.')
+        if role not in ['student', 'staff']:
+            messages.error(request, 'Please select a valid role (Student or Staff).')
             return render(request, 'iris_auth_app/register.html')
 
-        if IrisUser.objects.filter(username__iexact=username).exists():
-            messages.error(
-                request,
-                'An account with this username already exists. Do not register it again; ask authorized staff to re-enroll its iris.',
-            )
-            return render(request, 'iris_auth_app/register.html')
+        if role == 'student':
+            # Check authorized enrollment policy (BUG-015 / TRD FR-05)
+            if not getattr(settings, 'IRIS_ALLOW_OPEN_REGISTRATION', True) and not (request.user.is_authenticated and request.user.is_staff):
+                messages.error(request, 'Self-service registration is disabled. Contact staff for authorized enrollment.')
+                return render(request, 'iris_auth_app/register.html')
 
-        if IrisUser.objects.filter(student_id__iexact=student_id).exists():
-            messages.error(
-                request,
-                'An account with this student ID already exists. Do not register it again; ask authorized staff to re-enroll its iris.',
-            )
-            return render(request, 'iris_auth_app/register.html')
+            student_id = request.POST.get('student_id', '').strip()
+            if not username or not display_name or not student_id:
+                messages.error(request, 'Please complete all account fields.')
+                return render(request, 'iris_auth_app/register.html')
 
-        if uploaded_file is None:
-            messages.error(request, 'Please upload an iris image or capture one with the camera before creating the account.')
-            return render(request, 'iris_auth_app/register.html')
-
-        try:
-            image = _decode_capture(uploaded_file)
-            code, mask = extract_template_from_image(image)
-            sec_code, sec_mask = extract_secondary_template_from_image(image)
-            with transaction.atomic():
-                user = IrisUser.objects.create_user(
-                    username=username,
-                    display_name=display_name,
-                    student_id=student_id,
-                    password=None,
+            if IrisUser.objects.filter(username__iexact=username).exists():
+                messages.error(
+                    request,
+                    'An account with this username already exists. Do not register it again; ask authorized staff to re-enroll its iris.',
                 )
-                ensure_iris_template_for_user(
-                    user,
-                    code,
-                    mask,
-                    secondary_code_array=sec_code,
-                    secondary_mask_array=sec_mask,
+                return render(request, 'iris_auth_app/register.html')
+
+            if IrisUser.objects.filter(student_id__iexact=student_id).exists():
+                messages.error(
+                    request,
+                    'An account with this student ID already exists. Do not register it again; ask authorized staff to re-enroll its iris.',
                 )
+                return render(request, 'iris_auth_app/register.html')
 
-            messages.success(request, f'Enrollment successful for {user.display_name}. You can now log in using your iris.')
-            return redirect('login')
+            if uploaded_file is None:
+                messages.error(request, 'Please upload an iris image or capture one with the camera before creating the account.')
+                return render(request, 'iris_auth_app/register.html')
 
-        except ValidationError as exc:
-            messages.error(request, str(exc))
-            return render(request, 'iris_auth_app/register.html')
-        except IntegrityError:
-            messages.error(request, 'That username or student ID was registered at the same time. Please check the values and try again.')
-            return render(request, 'iris_auth_app/register.html')
-        except (cv2.error, ImportError, OSError, TypeError, ValueError, AttributeError):
-            logger.exception('Unexpected error while enrolling an iris account.')
-            messages.error(request, 'Iris enrollment failed. Please capture a clearer eye image and try again.')
-            return render(request, 'iris_auth_app/register.html')
+            try:
+                image = _decode_capture(uploaded_file)
+                code, mask = extract_template_from_image(image)
+                sec_code, sec_mask = extract_secondary_template_from_image(image)
+                with transaction.atomic():
+                    user = IrisUser.objects.create_user(
+                        username=username,
+                        display_name=display_name,
+                        student_id=student_id,
+                        password=None,
+                    )
+                    ensure_iris_template_for_user(
+                        user,
+                        code,
+                        mask,
+                        secondary_code_array=sec_code,
+                        secondary_mask_array=sec_mask,
+                    )
+
+                messages.success(request, f'Enrollment successful for {user.display_name}. You can now log in using your iris.')
+                return redirect('login')
+            except ValidationError as exc:
+                messages.error(request, str(exc))
+                return render(request, 'iris_auth_app/register.html')
+            except IntegrityError:
+                messages.error(request, 'That username or student ID was registered at the same time. Please check the values and try again.')
+                return render(request, 'iris_auth_app/register.html')
+            except (cv2.error, ImportError, OSError, TypeError, ValueError, AttributeError):
+                logger.exception('Unexpected error while enrolling an iris account.')
+                messages.error(request, 'Iris enrollment failed. Please capture a clearer eye image and try again.')
+                return render(request, 'iris_auth_app/register.html')
+
+        elif role == 'staff':
+            if not (request.user.is_authenticated and request.user.is_superuser):
+                messages.error(request, 'Only authorized administrators can register staff accounts.')
+                return render(request, 'iris_auth_app/register.html')
+
+            email = request.POST.get('email', '').strip()
+            employee_id = request.POST.get('employee_id', '').strip()
+            department = request.POST.get('department', '').strip()
+
+            if not username or not display_name:
+                messages.error(request, 'Please enter the staff username and name.')
+                return render(request, 'iris_auth_app/register.html')
+
+            if IrisUser.objects.filter(username__iexact=username).exists():
+                messages.error(request, 'That username is already registered.')
+                return render(request, 'iris_auth_app/register.html')
+
+            if uploaded_file is None:
+                messages.error(request, 'Please upload an iris image or capture one with the camera before creating the account.')
+                return render(request, 'iris_auth_app/register.html')
+
+            try:
+                image = _decode_capture(uploaded_file)
+                code, mask = extract_template_from_image(image)
+                sec_code, sec_mask = extract_secondary_template_from_image(image)
+            except ValidationError as exc:
+                messages.error(request, str(exc))
+                return render(request, 'iris_auth_app/register.html')
+            except (cv2.error, ImportError, OSError, TypeError, ValueError, AttributeError):
+                logger.exception('Unexpected error while extracting a staff enrollment template.')
+                messages.error(request, 'Staff enrollment failed. Please capture a clearer eye image and try again.')
+                return render(request, 'iris_auth_app/register.html')
+
+            try:
+                with transaction.atomic():
+                    staff_user = IrisUser.objects.create_user(
+                        username=username,
+                        display_name=display_name,
+                        email=email,
+                        password=None,
+                        is_staff=True,
+                        is_superuser=False,
+                    )
+                    if employee_id and not staff_user.student_id:
+                        staff_user.student_id = employee_id
+                        staff_user.save(update_fields=['student_id'])
+                    ensure_iris_template_for_user(
+                        staff_user,
+                        code,
+                        mask,
+                        secondary_code_array=sec_code,
+                        secondary_mask_array=sec_mask,
+                    )
+            except ValidationError as exc:
+                messages.error(request, str(exc))
+                return render(request, 'iris_auth_app/register.html')
+            except IntegrityError:
+                messages.error(request, 'That username was registered at the same time. Please choose another username.')
+                return render(request, 'iris_auth_app/register.html')
+            except (cv2.error, ImportError, OSError, TypeError, ValueError, AttributeError):
+                logger.exception('Unexpected error while creating a staff iris account.')
+                messages.error(request, 'Staff enrollment failed. No staff account was created.')
+                return render(request, 'iris_auth_app/register.html')
+
+            messages.success(request, f'Staff account {username} was created and enrolled.')
+            return redirect('staff_login')
 
     return render(request, 'iris_auth_app/register.html')
 
@@ -608,3 +680,60 @@ def staff_dashboard(request):
 def logout_view(request):
     logout(request)
     return redirect('home')
+
+
+@login_required(login_url='login')
+def student_attendance(request):
+    if request.user.is_staff or request.user.is_superuser:
+        raise PermissionDenied
+    records = request.user.attendance_records.all()
+    return render(request, 'iris_auth_app/student_attendance.html', {'records': records})
+
+
+@login_required(login_url='login')
+def student_fees(request):
+    if request.user.is_staff or request.user.is_superuser:
+        raise PermissionDenied
+    records = request.user.fee_records.all()
+    total_due = sum(record.amount_due for record in records)
+    total_paid = sum(record.amount_paid for record in records)
+    total_outstanding = sum(record.outstanding_balance() for record in records)
+    return render(
+        request,
+        'iris_auth_app/student_fees.html',
+        {
+            'records': records,
+            'total_due': total_due,
+            'total_paid': total_paid,
+            'total_outstanding': total_outstanding,
+        },
+    )
+
+
+@login_required(login_url='login')
+def student_timetable(request):
+    if request.user.is_staff or request.user.is_superuser:
+        raise PermissionDenied
+    entries = request.user.timetable_entries.all()
+    days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+    timetable_by_day = {day: [] for day in days}
+    for entry in entries:
+        if entry.day in timetable_by_day:
+            timetable_by_day[entry.day].append(entry)
+    return render(request, 'iris_auth_app/student_timetable.html', {'timetable_by_day': timetable_by_day})
+
+
+@login_required(login_url='login')
+def student_assessments(request):
+    if request.user.is_staff or request.user.is_superuser:
+        raise PermissionDenied
+    assessments = request.user.assessments.all()
+    return render(request, 'iris_auth_app/student_assessments.html', {'assessments': assessments})
+
+
+@login_required(login_url='login')
+def student_internal_marks(request):
+    if request.user.is_staff or request.user.is_superuser:
+        raise PermissionDenied
+    marks = request.user.internal_marks.all()
+    return render(request, 'iris_auth_app/student_internal_marks.html', {'marks': marks})

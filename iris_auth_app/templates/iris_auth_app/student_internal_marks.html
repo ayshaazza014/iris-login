@@ -1,0 +1,42 @@
+{% extends 'iris_auth_app/base.html' %}
+{% block title %}Internal Marks | SmartCampus{% endblock %}
+{% block content %}
+<section class="dashboard-shell">
+    <header class="dashboard-header">
+        <div>
+            <span class="section-eyebrow">STUDENT PORTAL</span>
+            <h1>Internal Marks</h1>
+            <p>Marks obtained in each subject.</p>
+        </div>
+        <a href="{% url 'dashboard' %}" class="secondary-btn">Back to Dashboard</a>
+    </header>
+    <article class="future-panel">
+        {% if marks %}
+        <table style="width:100%; border-collapse: collapse;">
+            <thead>
+                <tr style="text-align:left; border-bottom:1px solid var(--campus-border);">
+                    <th style="padding:10px;">Subject</th>
+                    <th style="padding:10px;">Exam Type</th>
+                    <th style="padding:10px;">Obtained</th>
+                    <th style="padding:10px;">Max Marks</th>
+                    <th style="padding:10px;">Percentage</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for mark in marks %}
+                <tr style="border-bottom:1px solid var(--campus-border);">
+                    <td style="padding:10px;">{{ mark.subject }}</td>
+                    <td style="padding:10px;">{{ mark.exam_type }}</td>
+                    <td style="padding:10px;">{{ mark.obtained_marks }}</td>
+                    <td style="padding:10px;">{{ mark.max_marks }}</td>
+                    <td style="padding:10px;">{{ mark.percentage }}%</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p>No internal marks available yet.</p>
+        {% endif %}
+    </article>
+</section>
+{% endblock %}

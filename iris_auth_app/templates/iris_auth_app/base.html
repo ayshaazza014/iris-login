@@ -29,6 +29,11 @@
                         <a href="{% url 'staff_reenroll' %}">Re-enroll iris</a>
                     {% else %}
                         <a href="{% url 'dashboard' %}" class="nav-dashboard">Dashboard</a>
+                        <a href="{% url 'student_attendance' %}">Attendance</a>
+                        <a href="{% url 'student_fees' %}">Fees</a>
+                        <a href="{% url 'student_timetable' %}">Timetable</a>
+                        <a href="{% url 'student_assessments' %}">Assessments</a>
+                        <a href="{% url 'student_internal_marks' %}">Internal Marks</a>
                     {% endif %}
                     {% if user.is_superuser %}
                         <a href="{% url 'staff_register' %}">Create staff account</a>
