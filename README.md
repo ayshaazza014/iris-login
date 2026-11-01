@@ -73,7 +73,7 @@ pytest tests
 
 ## Biometric Evaluation & Threshold Calibration
 
-In accordance with TRD FR-08, FR-13, and Section 8, the repository provides an automated evaluation suite to assess FAR, FRR, genuine/impostor distributions, and processing latency.
+In accordance with TRD FR-08, FR-13, and Section 8, the repository provides an automated evaluation suite to assess FAR, FRR, genuine/impostor distributions, and processing latency under both pure IrisCode and Multi-Feature Score Fusion (Iris + Periocular / Facial Geometry).
 
 Run the evaluation:
 ```powershell
@@ -83,14 +83,15 @@ python manage.py evaluate
 
 The command executes statistical comparisons across multi-session subject cohorts and outputs an empirical report to [`docs/EVALUATION_REPORT.md`](docs/EVALUATION_REPORT.md).
 
-### Key Measured Benchmark Metrics
-- **Mean Genuine Distance:** `0.1039 ± 0.0449`
-- **Mean Impostor Distance:** `0.4581 ± 0.0329`
-- **Zero-FAR Threshold:** `0.32` (0.00% False Acceptance Rate)
+### Key Measured Benchmark Metrics (Multi-Feature Fused)
+- **Mean Genuine Distance:** `0.1171 ± 0.0360` (lower variance than iris-only)
+- **Mean Impostor Distance:** `0.4561 ± 0.0271`
+- **Zero-FAR Threshold:** `0.35` (increased from 0.32 in baseline iris-only)
 - **1:N Match Threshold (`0.32`):** FAR: 0.00% | FRR: 0.00%
-- **1:1 Verify Threshold (`0.35`):** FAR: 0.38% | FRR: 0.00%
-- **Feature Extraction Latency:** ~148 ms / frame (compliant with NFR-08)
-- **Pairwise Comparison Latency:** ~5.5 ms / comparison
+- **1:1 Verify Threshold (`0.35`):** FAR: **0.00%** (improved from 0.38% in baseline iris-only) | FRR: 0.00%
+- **Feature Extraction Latency:** ~100 ms / frame (compliant with NFR-08)
+- **Pairwise Comparison Latency:** ~7.0 ms / comparison
+- **Biometric Pipeline:** OpenCV Haar Face/Eye Detection -> Circular Hough Segmentation -> Daugman Rubber-Sheet Normalization (64x512) -> 2D Log-Gabor Encoding (`gabor-eye-crop-v2`) fused with 259-D Periocular Gradient Orientation and Facial Geometry.
 
 ---
 

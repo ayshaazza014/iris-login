@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 MODULE_PATH = Path(__file__).resolve().parents[1] / 'iris_extract.py'
 MATCH_THRESHOLD = float(os.environ.get('IRIS_MATCH_THRESHOLD', '0.32'))
 VERIFICATION_THRESHOLD = float(os.environ.get('IRIS_VERIFICATION_THRESHOLD', '0.35'))
+FUSION_FACE_WEIGHT = float(os.environ.get('IRIS_FACIAL_FEATURE_WEIGHT', '0.20'))
 TEMPLATE_ENCODING_VERSION = 'gabor-eye-crop-v2'
 
 _iris_module = None
@@ -53,6 +54,7 @@ def ensure_iris_template_for_user(
     *,
     secondary_code_array=None,
     secondary_mask_array=None,
+    facial_features_array=None,
     encoding_version=TEMPLATE_ENCODING_VERSION,
 ):
     if not isinstance(user, IrisUser):
@@ -88,6 +90,10 @@ def ensure_iris_template_for_user(
         template.secondary_code = None
         template.secondary_mask = None
 
+    if facial_features_array is not None:
+        facial_arr = np.asarray(facial_features_array, dtype=np.float32)
+        template.facial_features = facial_arr.tobytes()
+
     template.code_shape = ','.join(str(dimension) for dimension in code_shape)
     template.mask_shape = ','.join(str(dimension) for dimension in mask_shape)
     template.encoding_version = encoding_version
@@ -96,7 +102,7 @@ def ensure_iris_template_for_user(
     return template
 
 
-def compare_templates(code_a, mask_a, code_b, mask_b, max_shift=20):
+def compare_templates(code_a, mask_a, code_b, mask_b, max_shift=20, *, feat_a=None, feat_b=None):
     module = load_iris_module()
     if code_a is None or mask_a is None or code_b is None or mask_b is None:
         raise ValidationError('All template arrays are required for comparison.')
@@ -109,7 +115,47 @@ def compare_templates(code_a, mask_a, code_b, mask_b, max_shift=20):
     if code_a.shape != code_b.shape or code_a.shape != mask_a.shape or code_b.shape != mask_b.shape:
         raise ValidationError('Template shapes must match for comparison.')
 
-    return module.hamming(code_a, mask_a, code_b, mask_b, max_shift=max_shift)
+    iris_dist = module.hamming(code_a, mask_a, code_b, mask_b, max_shift=max_shift)
+
+    # Multi-feature biometric fusion (iris + facial / periocular features)
+    if feat_a is not None and feat_b is not None and hasattr(module, 'compare_facial_features'):
+        try:
+            face_dist = module.compare_facial_features(feat_a, feat_b)
+            if face_dist is not None and math.isfinite(face_dist):
+                weight = float(os.environ.get('IRIS_FACIAL_FEATURE_WEIGHT', '0.20'))
+                return float((1.0 - weight) * iris_dist + weight * face_dist)
+        except Exception:
+            pass
+
+    return iris_dist
+
+
+def compare_facial_features(feat_a, feat_b):
+    """
+    Compare two facial feature vectors and return distance in [0.0, 1.0].
+    """
+    if feat_a is None or feat_b is None:
+        return 1.0
+    module = load_iris_module()
+    if hasattr(module, 'compare_facial_features'):
+        return module.compare_facial_features(feat_a, feat_b)
+    return 1.0
+
+
+def extract_facial_features(image_array):
+    """
+    Extract complementary facial and periocular feature vector from the image.
+    Returns 259-D np.float32 array, or None if extraction fails or no facial region is found.
+    """
+    if image_array is None:
+        return None
+    try:
+        module = load_iris_module()
+        if hasattr(module, 'extract_facial_features'):
+            return module.extract_facial_features(image_array)
+    except Exception:
+        pass
+    return None
 
 
 def extract_template_from_image(image_array):
@@ -250,10 +296,19 @@ def verify_iris_for_user(identifier, image_array, *, threshold=VERIFICATION_THRE
             return None
         stored_templates = template.get_all_templates()
         captured_templates = extract_all_candidate_templates(image_array)
+        stored_facial = template.get_facial_features()
+        captured_facial = extract_facial_features(image_array)
         distances = []
         for s_code, s_mask in stored_templates:
             for c_code, c_mask in captured_templates:
-                d = compare_templates(s_code, s_mask, c_code, c_mask)
+                d = compare_templates(
+                    s_code,
+                    s_mask,
+                    c_code,
+                    c_mask,
+                    feat_a=stored_facial,
+                    feat_b=captured_facial,
+                )
                 if math.isfinite(float(d)):
                     distances.append(d)
         if not distances:
@@ -270,6 +325,7 @@ def verify_iris_for_user(identifier, image_array, *, threshold=VERIFICATION_THRE
 def identify_user_from_iris_result(image_array, *, threshold=MATCH_THRESHOLD, staff_only=False):
     _validate_match_inputs(image_array, threshold)
     captured_templates = extract_all_candidate_templates(image_array)
+    captured_facial = extract_facial_features(image_array)
 
     templates = IrisTemplate.objects.filter(
         enrollment_status='active',
@@ -287,6 +343,7 @@ def identify_user_from_iris_result(image_array, *, threshold=MATCH_THRESHOLD, st
     for template in templates:
         try:
             stored_templates = template.get_all_templates()
+            stored_facial = template.get_facial_features()
             distances = []
             for s_code, s_mask in stored_templates:
                 for c_code, c_mask in captured_templates:
@@ -295,6 +352,8 @@ def identify_user_from_iris_result(image_array, *, threshold=MATCH_THRESHOLD, st
                         s_mask,
                         c_code,
                         c_mask,
+                        feat_a=stored_facial,
+                        feat_b=captured_facial,
                     )
                     if math.isfinite(float(d)):
                         distances.append(d)

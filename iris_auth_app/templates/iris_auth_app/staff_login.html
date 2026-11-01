@@ -41,13 +41,19 @@
             </div>
         </div>
 
-        <div id="camera-status" class="scanner-status idle" role="status" aria-live="polite" style="display:none;"></div>
+        <div id="camera-status" class="scanner-status idle" role="status" aria-live="polite">Choose an iris image below, or optionally use the camera.</div>
 
         <div class="form-actions">
             <button type="button" id="start-camera" class="primary-btn">Start Live Camera</button>
             <button type="button" id="stop-camera" class="stop-link" style="display:none;">Stop camera</button>
             <button type="submit" id="manual-scan-btn" class="primary-btn" disabled>Scan Iris &amp; Login</button>
         </div>
+        <div class="input-group">
+            <label for="capture">Iris image (PNG or JPEG)</label>
+            <input id="capture" type="file" name="capture" accept="image/png,image/jpeg" required>
+        </div>
+
+
 
         <div class="form-actions">
             <a href="{% url 'login' %}" class="text-link">Back to student login</a>

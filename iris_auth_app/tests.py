@@ -1063,3 +1063,94 @@ class SecurityAndAuthenticationHardeningTests(TestCase):
             )
             self.assertIsNone(template.secondary_code)
             mock_info.assert_called()
+
+
+class FacialFeaturesAndMultimodalTests(TestCase):
+    def test_extract_facial_features_invalid_input(self):
+        from iris_auth_app.services import extract_facial_features
+        self.assertIsNone(extract_facial_features(None))
+        # Plain black image has no detectable face or eyes
+        plain = np.zeros((100, 100, 3), dtype=np.uint8)
+        self.assertIsNone(extract_facial_features(plain))
+
+    def test_compare_facial_features_metrics(self):
+        from iris_auth_app.services import compare_facial_features
+        # None inputs
+        self.assertEqual(compare_facial_features(None, None), 1.0)
+        feat_a = np.ones(259, dtype=np.float32)
+        self.assertEqual(compare_facial_features(feat_a, None), 1.0)
+        self.assertEqual(compare_facial_features(None, feat_a), 1.0)
+
+        # Identical features -> distance 0.0
+        self.assertAlmostEqual(compare_facial_features(feat_a, feat_a), 0.0, places=4)
+
+        # Dissimilar features
+        feat_b = np.zeros(259, dtype=np.float32)
+        feat_b[3:] = -1.0  # opposite direction
+        dist = compare_facial_features(feat_a, feat_b)
+        self.assertGreater(dist, 0.5)
+
+    def test_compare_templates_fallback_and_fusion(self):
+        from iris_auth_app.services import compare_templates, FUSION_FACE_WEIGHT
+        code_a = np.zeros((8, 16), dtype=np.uint8)
+        mask_a = np.ones((8, 16), dtype=np.uint8)
+        code_b = np.zeros((8, 16), dtype=np.uint8)
+        mask_b = np.ones((8, 16), dtype=np.uint8)
+
+        # Pure iris distance (identical iris codes -> 0.0)
+        d_pure = compare_templates(code_a, mask_a, code_b, mask_b)
+        self.assertEqual(d_pure, 0.0)
+
+        # One missing facial feature -> fallback to pure iris distance
+        feat_dummy = np.ones(259, dtype=np.float32)
+        d_fallback = compare_templates(code_a, mask_a, code_b, mask_b, feat_a=feat_dummy, feat_b=None)
+        self.assertEqual(d_fallback, 0.0)
+
+        # Both present, different face distance
+        # e.g. face dist = 1.0, iris dist = 0.0
+        # Fused = (1 - 0.20) * 0.0 + 0.20 * 1.0 = 0.20
+        feat_opp = np.zeros(259, dtype=np.float32)
+        d_fused = compare_templates(code_a, mask_a, code_b, mask_b, feat_a=feat_dummy, feat_b=feat_opp)
+        self.assertGreater(d_fused, 0.0)
+        self.assertLessEqual(d_fused, 1.0)
+
+    def test_model_facial_features_round_trip(self):
+        user = IrisUser.objects.create_user(username='face_test_user')
+        code = np.zeros((8, 16), dtype=np.uint8)
+        mask = np.ones((8, 16), dtype=np.uint8)
+        raw_feat = np.linspace(0.1, 0.9, 259, dtype=np.float32)
+
+        template = IrisTemplate.create_for_user(
+            user, code, mask, facial_features_array=raw_feat
+        )
+        self.assertIsNotNone(template.facial_features)
+
+        loaded_feat = template.get_facial_features()
+        self.assertIsNotNone(loaded_feat)
+        self.assertEqual(loaded_feat.dtype, np.float32)
+        self.assertEqual(len(loaded_feat), 259)
+        np.testing.assert_allclose(loaded_feat, raw_feat, rtol=1e-5)
+
+    def test_verify_and_identify_with_facial_features(self):
+        user = IrisUser.objects.create_user(username='multimodal_user', display_name='Multimodal')
+        code = np.zeros((8, 16), dtype=np.uint8)
+        mask = np.ones((8, 16), dtype=np.uint8)
+        feat = np.ones(259, dtype=np.float32)
+
+        ensure_iris_template_for_user(user, code, mask, facial_features_array=feat)
+
+        # Verification with matching face feature
+        with patch('iris_auth_app.services.extract_template_from_image', return_value=(code, mask)):
+            with patch('iris_auth_app.services.extract_facial_features', return_value=feat):
+                verified_user = verify_iris_for_user(user, np.zeros((50, 50, 3), dtype=np.uint8))
+                self.assertIsNotNone(verified_user)
+                self.assertEqual(verified_user.username, 'multimodal_user')
+
+        # Identification with matching face feature
+        with patch('iris_auth_app.services.extract_template_from_image', return_value=(code, mask)):
+            with patch('iris_auth_app.services.extract_facial_features', return_value=feat):
+                identified_user, failure_reason = identify_user_from_iris_result(np.zeros((50, 50, 3), dtype=np.uint8))
+                self.assertIsNotNone(identified_user)
+                self.assertEqual(identified_user.username, 'multimodal_user')
+                self.assertIsNone(failure_reason)
+

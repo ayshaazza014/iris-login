@@ -2,11 +2,11 @@
 
 Audit date: 2026-10-26
 Scope: entire repository (`iris_auth_project`, `iris_auth_app`, `iris_extract.py`, static assets, templates, tests, docs, repo hygiene).
-Method: static line-by-line review + runtime verification (Django 61/61 tests pass, pytest 11/11 pass, `pip freeze` matches `requirements.txt`).
+Method: static line-by-line review + runtime verification (Django 75/75 tests pass, pytest 11/11 pass, `pip freeze` matches `requirements.txt`).
 Severity: 🔴 critical · 🟡 significant · 🟢 minor/quality. All "Status" values: **Open** unless marked otherwise.
 
 Verification evidence (already runs clean, cited as baseline):
-- `python manage.py test` → `Ran 61 tests in 9.754s OK` (exit 0).
+- `python manage.py test` → `Ran 75 tests in 20.393s OK` (exit 0).
 - `pytest tests` → `11 passed in 1.94s`.
 - `pip freeze`: Django==5.0.14, numpy==2.2.6, opencv-python==4.10.0.84, pytest==9.1.1 — no drift vs `requirements.txt`.
 
@@ -212,6 +212,14 @@ Verification evidence (already runs clean, cited as baseline):
 - **Confidence:** High.
 - **Status:** Fixed (rotated local .env secret key to explicitly labeled dev-only placeholder and confirmed .env is untracked).
 
+### BUG-026 — Iris-only pipeline sensitive to false positives and eyeglasses; improved via hierarchical face-guided eye detection and multi-feature facial fusion
+- **File:Line:** `iris_extract.py`, `iris_auth_app/services.py`, `iris_auth_app/models.py`.
+- **Trigger:** Eyeglasses reflections, head tilt, or non-ocular false positives from unconstrained whole-image eye Haar cascade.
+- **Impact:** Elevated False Accept Rate (0.38% at verification threshold T=0.35) and failure to detect eyes when subjects wear spectacles.
+- **Suggested Fix:** Implement hierarchical detection (face ROI bounding box constraining ocular search to upper 18%–58% band, with eyeglasses cascade fallback). Extract complementary 259-D facial geometry and periocular gradient orientation histogram, performing score fusion ($D = 0.80 D_{\text{iris}} + 0.20 D_{\text{face}}$) with fallback to pure iris distance when facial features are unavailable.
+- **Confidence:** High.
+- **Status:** Fixed (implemented face-guided ROI + eyeglasses fallback + 259-D periocular/facial score fusion; reduced 1:1 verify FAR at T=0.35 from 0.38% to 0.00%, increased Zero-FAR threshold to 0.35).
+
 ---
 
 ## ✅ Verified-solid (audit credits — do not regress)
@@ -227,7 +235,7 @@ Verification evidence (already runs clean, cited as baseline):
 - Unknown/failed matching → fail-closed session refusal everywhere (matches TRD `trd.md:101-102`); no session is created on mismatch.
 - Home page carries the required no-accuracy/no-liveness disclaimer (`templates/iris_auth_app/home.html`); README honestly documents setup and known limitations (TRD §9/README contract observed).
 - Repo hygiene core is correct: `.env` not tracked, `db.sqlite3` not tracked, git status clean, all 47 tracked files reviewed, no committed biometric data of real persons.
-- Tests are thorough for their scope: 61 Django tests + 11 pytest (template format, Hamming math, mask occlusion, gabor cache, pupil fallbacks), and pass cleanly.
+- Tests are thorough for their scope: 75 Django tests + 11 pytest (template format, Hamming math, mask occlusion, gabor cache, pupil fallbacks, and multimodal facial/periocular score fusion), and pass cleanly.
 
 ---
 

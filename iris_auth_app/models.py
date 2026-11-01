@@ -169,6 +169,11 @@ class IrisTemplate(models.Model):
     mask_shape = models.CharField(max_length=32, default='256,512')
     mask_dtype = models.CharField(max_length=16, default='uint8')
     encoding_version = models.CharField(max_length=64, default='gabor-eye-crop-v2')
+    facial_features = models.BinaryField(
+        null=True,
+        blank=True,
+        help_text='Serialized facial and periocular feature descriptor bytes for multi-feature fusion.',
+    )
     enrollment_status = models.CharField(
         max_length=20,
         choices=[('pending', 'Pending'), ('active', 'Active'), ('rejected', 'Rejected')],
@@ -217,6 +222,7 @@ class IrisTemplate(models.Model):
         *,
         secondary_code_array=None,
         secondary_mask_array=None,
+        facial_features_array=None,
         encoding_version='gabor-v1',
     ):
         code_bytes, code_shape, code_dtype = cls.serialize_array(code_array)
@@ -228,12 +234,18 @@ class IrisTemplate(models.Model):
             sec_code_bytes, _, _ = cls.serialize_array(secondary_code_array)
             sec_mask_bytes, _, _ = cls.serialize_array(secondary_mask_array)
 
+        facial_bytes = None
+        if facial_features_array is not None:
+            facial_arr = np.asarray(facial_features_array, dtype=np.float32)
+            facial_bytes = facial_arr.tobytes()
+
         return cls.objects.create(
             user=user,
             code=code_bytes,
             mask=mask_bytes,
             secondary_code=sec_code_bytes,
             secondary_mask=sec_mask_bytes,
+            facial_features=facial_bytes,
             code_shape=','.join(str(dim) for dim in code_shape),
             code_dtype=code_dtype,
             mask_shape=','.join(str(dim) for dim in mask_shape),
@@ -241,6 +253,17 @@ class IrisTemplate(models.Model):
             encoding_version=encoding_version,
             enrollment_status='active',
         )
+
+    def get_facial_features(self):
+        """
+        Returns deserialized facial & periocular feature vector (np.float32) if present, or None.
+        """
+        if not self.facial_features:
+            return None
+        try:
+            return np.frombuffer(self.facial_features, dtype=np.float32)
+        except Exception:
+            return None
 
     def validate_template(self):
         if not self.code or not self.mask:

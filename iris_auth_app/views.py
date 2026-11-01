@@ -21,6 +21,7 @@ from .models import IrisTemplate, IrisUser
 from .services import (
     TEMPLATE_ENCODING_VERSION,
     ensure_iris_template_for_user,
+    extract_facial_features,
     extract_secondary_template_from_image,
     extract_template_from_image,
     identify_user_from_iris_result,
@@ -285,6 +286,7 @@ def register_view(request):
                 image = _decode_capture(uploaded_file)
                 code, mask = extract_template_from_image(image)
                 sec_code, sec_mask = extract_secondary_template_from_image(image)
+                facial_features = extract_facial_features(image)
                 with transaction.atomic():
                     user = IrisUser.objects.create_user(
                         username=username,
@@ -298,6 +300,7 @@ def register_view(request):
                         mask,
                         secondary_code_array=sec_code,
                         secondary_mask_array=sec_mask,
+                        facial_features_array=facial_features,
                     )
 
                 messages.success(request, f'Enrollment successful for {user.display_name}. You can now log in using your iris.')
@@ -338,6 +341,7 @@ def register_view(request):
                 image = _decode_capture(uploaded_file)
                 code, mask = extract_template_from_image(image)
                 sec_code, sec_mask = extract_secondary_template_from_image(image)
+                facial_features = extract_facial_features(image)
             except ValidationError as exc:
                 messages.error(request, str(exc))
                 return render(request, 'iris_auth_app/register.html')
@@ -365,6 +369,7 @@ def register_view(request):
                         mask,
                         secondary_code_array=sec_code,
                         secondary_mask_array=sec_mask,
+                        facial_features_array=facial_features,
                     )
             except ValidationError as exc:
                 messages.error(request, str(exc))
@@ -455,6 +460,7 @@ def staff_register_view(request):
             image = _decode_capture(uploaded_file)
             code, mask = extract_template_from_image(image)
             sec_code, sec_mask = extract_secondary_template_from_image(image)
+            facial_features = extract_facial_features(image)
         except ValidationError as exc:
             messages.error(request, str(exc))
             return render(request, 'iris_auth_app/staff_register.html')
@@ -479,6 +485,7 @@ def staff_register_view(request):
                     mask,
                     secondary_code_array=sec_code,
                     secondary_mask_array=sec_mask,
+                    facial_features_array=facial_features,
                 )
         except ValidationError as exc:
             messages.error(request, str(exc))
@@ -516,6 +523,7 @@ def staff_reenroll_view(request):
             image = _decode_capture(request.FILES.get('capture'))
             code, mask = extract_template_from_image(image)
             sec_code, sec_mask = extract_secondary_template_from_image(image)
+            facial_features = extract_facial_features(image)
             # Note on BUG-023: select_for_update() provides row-level locking on Postgres/MySQL;
             # on SQLite (dev default), atomic() provides database-level transaction locking.
             with transaction.atomic():
@@ -530,6 +538,7 @@ def staff_reenroll_view(request):
                     mask,
                     secondary_code_array=sec_code,
                     secondary_mask_array=sec_mask,
+                    facial_features_array=facial_features,
                 )
 
             logger.info(f"Staff '{request.user.username}' re-enrolled iris template for student '{student.username}' (id={student.pk}).")

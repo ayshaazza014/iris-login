@@ -1,13 +1,14 @@
 """
-Iris structure extraction pipeline (Daugman-style)
+Iris and facial multi-feature extraction pipeline (Daugman iris + periocular facial geometry)
 
 Steps per image:
- 1. Detect eye regions (Haar cascade; both eyes in close-ups are handled separately)
+ 1. Detect facial context & ocular regions (Haar face + eye cascades; eyeglasses tolerant)
  2. Segment pupil (inner boundary) and iris (outer boundary)
  3. Normalise the annular iris into a fixed-size rectangle (rubber-sheet model)
  4. Enhance texture (CLAHE) -> this is the "iris structure" image
  5. Encode texture with Gabor filters -> binary IrisCode + mask
- 6. Save debug overlays, normalised iris, and IrisCode; optional Hamming-distance matching
+ 6. Extract facial geometry & periocular feature descriptors for multi-modal fusion
+ 7. Save debug overlays, normalised iris, and IrisCode; optional Hamming-distance matching
 
 Usage:
     python iris_extract.py --input /path/to/images --output out
@@ -26,15 +27,68 @@ NORM_H, NORM_W = 64, 512  # normalised iris size (radial x angular)
 
 
 # --------------------------------------------------------------------------
-# 1. Eye detection
+# 1. Eye and Face detection
 # --------------------------------------------------------------------------
 def detect_eyes(gray):
-    """Return list of (x, y, w, h) eye boxes sorted left->right."""
-    cascade = cv2.CascadeClassifier(
-        cv2.data.haarcascades + "haarcascade_eye.xml")
+    """
+    Return list of (x, y, w, h) eye boxes sorted left->right.
+    Hierarchical strategy:
+      1. First check if a face is present; if so, restrict eye search to the
+         anatomical ocular band (upper 18% to 55% of the face ROI), greatly reducing
+         false positives from clothing patterns, nostrils, or backgrounds.
+      2. If eyes are found with standard eye cascade, return them.
+      3. If no eyes are found (e.g. subject is wearing eyeglasses), try the
+         eyeglasses-tolerant cascade.
+      4. If no face is detected (e.g. single-eye macro close-up or synthetic eye),
+         fall back to whole-frame eye detection.
+    """
     h, w = gray.shape
     min_sz = max(40, int(min(h, w) * 0.08))
-    eyes = cascade.detectMultiScale(gray, 1.1, 5, minSize=(min_sz, min_sz))
+
+    face_cascade = cv2.CascadeClassifier(
+        cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+    )
+    eye_cascade = cv2.CascadeClassifier(
+        cv2.data.haarcascades + "haarcascade_eye.xml"
+    )
+    glasses_cascade = cv2.CascadeClassifier(
+        cv2.data.haarcascades + "haarcascade_eye_tree_eyeglasses.xml"
+    )
+
+    eyes = []
+    # Try face detection first
+    min_face = max(80, int(min(h, w) * 0.20))
+    faces = face_cascade.detectMultiScale(gray, 1.1, 4, minSize=(min_face, min_face))
+
+    if len(faces) > 0:
+        faces = sorted(faces, key=lambda f: f[2] * f[3], reverse=True)
+        fx, fy, fw, fh = faces[0]
+        # Restrict search to ocular region (upper ~18% to ~55% of face)
+        y0 = max(0, int(fy + 0.18 * fh))
+        y1 = min(h, int(fy + 0.58 * fh))
+        x0 = max(0, int(fx + 0.05 * fw))
+        x1 = min(w, int(fx + 0.95 * fw))
+        ocular_roi = gray[y0:y1, x0:x1]
+
+        if ocular_roi.size > 0:
+            eye_min = max(25, int(fw * 0.10))
+            detected_in_face = eye_cascade.detectMultiScale(
+                ocular_roi, 1.1, 4, minSize=(eye_min, eye_min)
+            )
+            if len(detected_in_face) == 0:
+                detected_in_face = glasses_cascade.detectMultiScale(
+                    ocular_roi, 1.1, 3, minSize=(eye_min, eye_min)
+                )
+            for (ex, ey, ew, eh) in detected_in_face:
+                eyes.append((x0 + ex, y0 + ey, ew, eh))
+
+    if not eyes:
+        # Fallback to direct eye detection across whole frame
+        detected = eye_cascade.detectMultiScale(gray, 1.1, 5, minSize=(min_sz, min_sz))
+        if len(detected) == 0:
+            detected = glasses_cascade.detectMultiScale(gray, 1.1, 3, minSize=(min_sz, min_sz))
+        eyes = [tuple(e) for e in detected]
+
     eyes = sorted(eyes, key=lambda e: e[2] * e[3], reverse=True)[:2]
     return sorted([tuple(e) for e in eyes], key=lambda e: e[0])
 
@@ -192,6 +246,139 @@ def hamming(code1, mask1, code2, mask2, max_shift=16):
         if score < best:
             best = score
     return float(best)
+
+
+# --------------------------------------------------------------------------
+# 5. Facial and Periocular Multi-Feature Processing
+# --------------------------------------------------------------------------
+def extract_facial_features(image_bgr_or_gray, eyes=None):
+    """
+    Extract complementary facial and periocular features:
+      1. Facial geometry: Inter-ocular distance ratio, facial tilt angle, and relative eye size.
+      2. Periocular texture: 256-D gradient orientation descriptor covering eyebrow, eye contour,
+         and orbital margin.
+    Returns a normalized 259-D np.float32 vector, or None if eye localization is impossible.
+    """
+    if image_bgr_or_gray is None or image_bgr_or_gray.size == 0:
+        return None
+
+    if image_bgr_or_gray.ndim == 3:
+        gray = cv2.cvtColor(image_bgr_or_gray, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = image_bgr_or_gray
+
+    h, w = gray.shape
+
+    if eyes is None or len(eyes) == 0:
+        eyes = detect_eyes(gray)
+
+    if not eyes:
+        return None
+
+    eyes = sorted(eyes, key=lambda e: e[0])  # sort left to right
+
+    # Facial geometry feature vector (3 elements)
+    geo_features = []
+    face_cascade = cv2.CascadeClassifier(
+        cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+    )
+    faces = face_cascade.detectMultiScale(gray, 1.1, 4, minSize=(60, 60))
+    face_box = faces[0] if len(faces) > 0 else None
+
+    ref_w = float(face_box[2]) if face_box is not None else float(w)
+    ref_h = float(face_box[3]) if face_box is not None else float(h)
+
+    if len(eyes) >= 2:
+        e1, e2 = eyes[0], eyes[1]
+        c1 = (e1[0] + e1[2] / 2.0, e1[1] + e1[3] / 2.0)
+        c2 = (e2[0] + e2[2] / 2.0, e2[1] + e2[3] / 2.0)
+        dx = c2[0] - c1[0]
+        dy = c2[1] - c1[1]
+        interocular_dist = np.hypot(dx, dy)
+        interocular_ratio = interocular_dist / max(1.0, ref_w)
+        tilt_angle = np.arctan2(dy, max(1.0, dx))  # tilt in radians
+        avg_eye_ratio = ((e1[2] + e2[2]) / 2.0) / max(1.0, ref_w)
+        geo_features = [interocular_ratio, tilt_angle, avg_eye_ratio]
+    else:
+        e = eyes[0]
+        geo_features = [0.0, 0.0, float(e[2]) / max(1.0, ref_w)]
+
+    # Periocular texture descriptor (256 elements)
+    # Target largest/primary eye box
+    primary_eye = sorted(eyes, key=lambda e: e[2] * e[3], reverse=True)[0]
+    px, py, pw, ph = primary_eye
+
+    pad_t = int(0.35 * ph)
+    pad_b = int(0.20 * ph)
+    pad_s = int(0.25 * pw)
+
+    y_start = max(0, py - pad_t)
+    y_end = min(h, py + ph + pad_b)
+    x_start = max(0, px - pad_s)
+    x_end = min(w, px + pw + pad_s)
+
+    peri_roi = gray[y_start:y_end, x_start:x_end]
+    if peri_roi.size > 0:
+        peri_resized = cv2.resize(peri_roi, (64, 32))
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
+        peri_enh = clahe.apply(peri_resized)
+
+        gx = cv2.Sobel(peri_enh, cv2.CV_32F, 1, 0, ksize=3)
+        gy = cv2.Sobel(peri_enh, cv2.CV_32F, 0, 1, ksize=3)
+        mag, ang = cv2.cartToPolar(gx, gy, angleInDegrees=True)
+
+        n_bins = 8
+        hists = []
+        for r in range(4):
+            for c in range(8):
+                c_mag = mag[r * 8:(r + 1) * 8, c * 8:(c + 1) * 8]
+                c_ang = ang[r * 8:(r + 1) * 8, c * 8:(c + 1) * 8]
+                b_idx = (c_ang / 45.0).astype(np.int32) % n_bins
+                hist = np.zeros(n_bins, dtype=np.float32)
+                for b in range(n_bins):
+                    hist[b] = np.sum(c_mag[b_idx == b])
+                hists.append(hist)
+        tex_vec = np.concatenate(hists)
+        t_norm = np.linalg.norm(tex_vec)
+        if t_norm > 1e-6:
+            tex_vec /= t_norm
+    else:
+        tex_vec = np.zeros(256, dtype=np.float32)
+
+    full_vector = np.concatenate([np.array(geo_features, dtype=np.float32), tex_vec])
+    return full_vector.astype(np.float32)
+
+
+def compare_facial_features(feat_a, feat_b):
+    """
+    Compute normalized biometric distance between two facial/periocular feature vectors.
+    Returns float in [0.0, 1.0].
+    """
+    if feat_a is None or feat_b is None:
+        return None
+    fa = np.asarray(feat_a, dtype=np.float32).flatten()
+    fb = np.asarray(feat_b, dtype=np.float32).flatten()
+    if fa.shape != fb.shape or fa.size < 4:
+        return None
+
+    geo_a, tex_a = fa[:3], fa[3:]
+    geo_b, tex_b = fb[:3], fb[3:]
+
+    # Periocular texture cosine distance
+    norm_a = np.linalg.norm(tex_a)
+    norm_b = np.linalg.norm(tex_b)
+    if norm_a > 1e-6 and norm_b > 1e-6:
+        cos_sim = float(np.dot(tex_a, tex_b) / (norm_a * norm_b))
+        d_tex = max(0.0, min(1.0, (1.0 - cos_sim) / 2.0 * 2.0))
+    else:
+        d_tex = 0.5
+
+    # Geometric ratios distance
+    d_geo = float(np.linalg.norm(geo_a - geo_b))
+    d_geo = min(1.0, d_geo * 2.0)
+
+    fused_dist = 0.80 * d_tex + 0.20 * d_geo
+    return float(max(0.0, min(1.0, fused_dist)))
 
 
 # --------------------------------------------------------------------------

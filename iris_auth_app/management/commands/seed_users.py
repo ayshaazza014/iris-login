@@ -5,7 +5,11 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 
 from iris_auth_app.models import IrisUser
-from iris_auth_app.services import ensure_iris_template_for_user, extract_template_from_image
+from iris_auth_app.services import (
+    ensure_iris_template_for_user,
+    extract_facial_features,
+    extract_template_from_image,
+)
 
 
 class Command(BaseCommand):
@@ -62,7 +66,8 @@ class Command(BaseCommand):
                     img = cv2.imread(str(synthetic_path))
                     if img is not None:
                         code, mask = extract_template_from_image(img)
-                        ensure_iris_template_for_user(alice, code, mask)
+                        facial_feat = extract_facial_features(img)
+                        ensure_iris_template_for_user(alice, code, mask, facial_features_array=facial_feat)
                         self.stdout.write(
                             self.style.WARNING(
                                 'SECURITY WARNING: Enrolled demo synthetic template for alice. '
