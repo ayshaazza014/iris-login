@@ -4,7 +4,7 @@ import cv2
 from django.conf import settings
 from django.core.management.base import BaseCommand
 
-from iris_auth_app.models import IrisUser
+from iris_auth_app.models import AttendanceRecord, FeeRecord, IrisUser
 from iris_auth_app.services import (
     ensure_iris_template_for_user,
     extract_facial_features,
@@ -46,6 +46,25 @@ class Command(BaseCommand):
             else:
                 self.stdout.write(self.style.WARNING(f'Already exists: {user.username}'))
 
+        # Demo portal data (attendance/fees/timetable/assessments/marks) for sample students
+        alice = IrisUser.objects.filter(username='alice').first()
+        if alice:
+            AttendanceRecord.objects.update_or_create(
+                student=alice,
+                subject='AI',
+                defaults={'attended_classes': 12, 'total_classes': 15},
+            )
+            FeeRecord.objects.update_or_create(
+                student=alice,
+                fee_type='Tuition Fee',
+                defaults={
+                    'amount_due': 50000,
+                    'amount_paid': 150000,
+                    'due_date': None,
+                },
+            )
+            self.stdout.write(self.style.SUCCESS('Seeded demo attendance and fee data for alice'))
+
         # Gate synthetic enrollment behind settings.DEBUG or explicit --demo flag
         allow_demo_enrollment = getattr(settings, 'DEBUG', False) or options.get('demo')
         synthetic_path = Path(settings.BASE_DIR) / 'synthetic_eye.png'
@@ -60,7 +79,6 @@ class Command(BaseCommand):
             return
 
         if synthetic_path.exists():
-            alice = IrisUser.objects.filter(username='alice').first()
             if alice and not getattr(alice, 'iris_template', None):
                 try:
                     img = cv2.imread(str(synthetic_path))
