@@ -48,13 +48,19 @@ class Command(BaseCommand):
 
         # Demo portal data (attendance/fees) for all registered students
         students = IrisUser.objects.filter(is_staff=False, is_superuser=False)
-        attendance_subjects = ['AI', 'EVS', 'GT', 'CN', 'SC']
+        attendance_data = [
+            ('AI', 12, 15),
+            ('EVS', 14, 15),
+            ('GT', 10, 15),
+            ('CN', 13, 15),
+            ('SC', 11, 15),
+        ]
         for student in students:
-            for subject in attendance_subjects:
+            for subject, attended, total in attendance_data:
                 AttendanceRecord.objects.update_or_create(
                     student=student,
                     subject=subject,
-                    defaults={'attended_classes': 12, 'total_classes': 15},
+                    defaults={'attended_classes': attended, 'total_classes': total},
                 )
             FeeRecord.objects.update_or_create(
                 student=student,
@@ -65,7 +71,8 @@ class Command(BaseCommand):
                     'due_date': None,
                 },
             )
-        self.stdout.write(self.style.SUCCESS(f'Seeded demo attendance ({", ".join(attendance_subjects)}) and fee data for {students.count()} registered student(s)'))
+        subject_names = [s for s, _, _ in attendance_data]
+        self.stdout.write(self.style.SUCCESS(f'Seeded demo attendance ({", ".join(subject_names)}) with varied values and fee data for {students.count()} registered student(s)'))
 
         # Gate synthetic enrollment behind settings.DEBUG or explicit --demo flag
         allow_demo_enrollment = getattr(settings, 'DEBUG', False) or options.get('demo')
