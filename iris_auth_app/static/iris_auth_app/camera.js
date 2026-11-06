@@ -272,10 +272,36 @@ function scanCurrentFrame() {
         } else if (data.status === 'retry') {
           if (cameraPanel) cameraPanel.classList.add('scanning');
           if (scannerFrameText) scannerFrameText.style.display = 'none';
-          setStatus(data.message || 'Iris not recognized. Move closer, keep your eyes open and try again.', 'failure');
-          if (scannerBadge) {
+
+          if (data.detection) {
+            const det = data.detection;
+            if (det.face_detected && cameraPanel) {
+              cameraPanel.classList.add('face-detected');
+            } else if (cameraPanel) {
+              cameraPanel.classList.remove('face-detected');
+            }
+            if (det.iris_detected && cameraPanel) {
+              cameraPanel.classList.add('iris-detected');
+            } else if (cameraPanel) {
+              cameraPanel.classList.remove('iris-detected');
+            }
+
+            if (scannerBadge) {
+              if (det.face_detected && det.iris_detected) {
+                scannerBadge.textContent = '✓ Face & Iris Locked (' + (det.eyes_detected || 1) + ' eye)';
+              } else if (det.face_detected) {
+                scannerBadge.textContent = '✓ Face Aligned • Centering Iris';
+              } else if (det.eyes_detected > 0) {
+                scannerBadge.textContent = 'Eyes Found • Scanning...';
+              } else {
+                scannerBadge.textContent = 'Scanning live';
+              }
+            }
+          } else if (scannerBadge) {
             scannerBadge.textContent = 'Scanning live';
           }
+
+          setStatus(data.message || 'Iris not recognized. Move closer, keep your eyes open and try again.', 'failure');
         }
       } else if (response.status === 429) {
         const retryHeader = response.headers.get('Retry-After');
