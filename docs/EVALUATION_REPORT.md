@@ -1,6 +1,6 @@
 # Iris Biometric Authentication — Empirical Evaluation Report
 
-**Date of Evaluation:** 2026-11-01 15:10:06 UTC  
+**Date of Evaluation:** 2026-11-06 16:44:46 UTC  
 **Pipeline:** OpenCV Haar Face/Eye Detection -> Circular Boundary Segmentation -> Daugman Rubber-Sheet Normalization (64x512) -> CLAHE Texture Enhancement -> 2D Log-Gabor Encoding (`gabor-eye-crop-v2`) + 259-D Facial/Periocular Descriptor Fusion (80% Iris, 20% Face).  
 **Evaluation Methodology:** In accordance with TRD FR-08, FR-13, and Section 8, this report measures statistical separation between genuine intra-subject comparisons and impostor cross-subject comparisons under both Iris-Only and Multi-Feature Fused configurations.
 
@@ -20,9 +20,9 @@
 | **Equal Error Rate (EER)** | `0.00%` (at $T \approx 0.23$) | `0.00%` (at $T \approx 0.21$) | Accuracy benchmark |
 | **1:N Match (T=0.32)** | FAR: `0.00%` \| FRR: `0.00%` | FAR: `0.00%` \| FRR: `0.00%` | High-security 1:N threshold |
 | **1:1 Verify (T=0.35)** | FAR: `0.38%` \| FRR: `0.00%` | FAR: `0.00%` \| FRR: `0.00%` | Usable 1:1 threshold |
-| **Mean Extraction Latency** | `99.44 ms` | `99.44 ms` | Compliant with NFR-08 |
-| **Mean Comparison Latency** | `7.049 ms` | `7.049 ms` | Multi-shift Hamming + Cosine |
-| **End-to-End Decision Latency** | `~106.49 ms` | `~106.49 ms` | Single 1:1 authentication request |
+| **Mean Extraction Latency** | `464.61 ms` | `464.61 ms` | Compliant with NFR-08 |
+| **Mean Comparison Latency** | `11.321 ms` | `11.321 ms` | Multi-shift Hamming + Cosine |
+| **End-to-End Decision Latency** | `~475.93 ms` | `~475.93 ms` | Single 1:1 authentication request |
 
 ---
 

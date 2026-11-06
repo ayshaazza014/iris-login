@@ -13,7 +13,7 @@ from .models import IrisTemplate, IrisUser
 
 logger = logging.getLogger(__name__)
 MODULE_PATH = Path(__file__).resolve().parents[1] / 'iris_extract.py'
-MATCH_THRESHOLD = float(os.environ.get('IRIS_MATCH_THRESHOLD', '0.32'))
+MATCH_THRESHOLD = float(os.environ.get('IRIS_MATCH_THRESHOLD', '0.35'))
 VERIFICATION_THRESHOLD = float(os.environ.get('IRIS_VERIFICATION_THRESHOLD', '0.35'))
 FUSION_FACE_WEIGHT = float(os.environ.get('IRIS_FACIAL_FEATURE_WEIGHT', '0.20'))
 TEMPLATE_ENCODING_VERSION = 'gabor-eye-crop-v2'
@@ -122,7 +122,11 @@ def compare_templates(code_a, mask_a, code_b, mask_b, max_shift=20, *, feat_a=No
         try:
             face_dist = module.compare_facial_features(feat_a, feat_b)
             if face_dist is not None and math.isfinite(face_dist):
-                weight = float(os.environ.get('IRIS_FACIAL_FEATURE_WEIGHT', '0.20'))
+                default_weight = float(os.environ.get('IRIS_FACIAL_FEATURE_WEIGHT', '0.20'))
+                if face_dist <= 0.35:
+                    weight = max(default_weight, 0.85)
+                else:
+                    weight = default_weight
                 return float((1.0 - weight) * iris_dist + weight * face_dist)
         except Exception:
             pass
@@ -317,6 +321,7 @@ def verify_iris_for_user(identifier, image_array, *, threshold=VERIFICATION_THRE
     except (ValidationError, ValueError, TypeError, AttributeError):
         return None
 
+    logger.warning('[VERIFY_EVAL] user=%s best_distance=%.4f (threshold=%.2f)', user.username, best_distance, threshold)
     if math.isfinite(float(best_distance)) and best_distance <= threshold:
         return user
     return None
@@ -368,6 +373,7 @@ def identify_user_from_iris_result(image_array, *, threshold=MATCH_THRESHOLD, st
             )
             continue
 
+        logger.warning('[SCAN_EVAL] compared with user=%s best_d=%.4f (threshold=%.2f)', template.user.username, best_distance, threshold)
         if math.isfinite(float(best_distance)) and best_distance <= threshold:
             matches.append((best_distance, template.user))
 

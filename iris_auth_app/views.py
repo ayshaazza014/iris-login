@@ -468,6 +468,7 @@ def staff_login_view(request):
             messages.success(request, f'Staff iris verification succeeded for {user.display_name or user.username}.')
             return redirect('staff_dashboard')
         except ValidationError as exc:
+            logger.warning("[LOGIN_EXC] %s", exc)
             if is_ajax:
                 return JsonResponse({'status': 'retry', 'message': str(exc)})
             messages.error(request, str(exc))
@@ -659,7 +660,7 @@ def login_view(request):
                 return render(request, 'iris_auth_app/login.html')
 
             user, failure_reason = identify_user_from_iris_result(image, staff_only=False)
-            logger.info("Iris scan evaluated: matched=%s, failure_reason=%s, is_ajax=%s", bool(user), failure_reason, is_ajax)
+            logger.warning("[LOGIN_EVAL] ident='%s' matched=%s failure_reason=%s is_ajax=%s", identifier, bool(user), failure_reason, is_ajax)
             if user is not None:
                 logger.debug("Iris scan successfully matched user_id=%s", user.pk)
             if user is not None:
@@ -681,6 +682,7 @@ def login_view(request):
             return render(request, 'iris_auth_app/login.html')
 
         except ValidationError as exc:
+            logger.warning("[LOGIN_EXC] %s", exc)
             if is_ajax:
                 return JsonResponse({'status': 'retry', 'message': str(exc)})
             messages.error(request, str(exc))
