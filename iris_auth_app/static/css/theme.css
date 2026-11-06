@@ -151,6 +151,16 @@ select {
   background: #18372b;
 }
 
+.nav a.nav-portal[aria-current="page"] {
+  color: #fff;
+  background: var(--campus-primary);
+}
+
+.nav a.nav-portal[aria-current="page"]:hover {
+  color: #fff;
+  background: #18372b;
+}
+
 .content-shell {
   width: 100%;
   flex: 1;

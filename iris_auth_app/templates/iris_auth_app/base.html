@@ -19,24 +19,23 @@
                 </span>
             </a>
             <nav class="nav" aria-label="Main navigation">
-                <a href="{% url 'home' %}" {% if request.resolver_match.url_name == 'home' %}aria-current="page"{% endif %}>Home</a>
-                <a href="{% url 'register' %}" {% if request.resolver_match.url_name == 'register' %}aria-current="page"{% endif %}>Register</a>
-                <a href="{% url 'login' %}" {% if request.resolver_match.url_name == 'login' %}aria-current="page"{% endif %}>Student Login</a>
-                <a href="{% url 'staff_login' %}" {% if request.resolver_match.url_name == 'staff_login' %}aria-current="page"{% endif %}>Staff Login</a>
-                {% if user.is_authenticated %}
-                    {% if user.is_staff %}
-                        <a href="{% url 'staff_dashboard' %}" class="nav-dashboard">Dashboard</a>
-                        <a href="{% url 'staff_reenroll' %}">Re-enroll iris</a>
-                    {% else %}
-                        <a href="{% url 'dashboard' %}" class="nav-dashboard">Dashboard</a>
-                        <a href="{% url 'student_attendance' %}">Attendance</a>
-                        <a href="{% url 'student_fees' %}">Fees</a>
-                        <a href="{% url 'student_timetable' %}">Timetable</a>
-                        <a href="{% url 'student_assessments' %}">Assessments</a>
-                        <a href="{% url 'student_internal_marks' %}">Internal Marks</a>
-                    {% endif %}
-                    {% if user.is_superuser %}
-                        <a href="{% url 'staff_register' %}">Create staff account</a>
+                {% if user.is_authenticated and not user.is_staff %}
+                    <a href="{% url 'dashboard' %}" class="nav-portal" {% if request.resolver_match.url_name == 'dashboard' %}aria-current="page"{% endif %}>Dashboard</a>
+                    <a href="{% url 'student_attendance' %}" class="nav-portal" {% if request.resolver_match.url_name == 'student_attendance' %}aria-current="page"{% endif %}>Attendance</a>
+                    <a href="{% url 'student_fees' %}" class="nav-portal" {% if request.resolver_match.url_name == 'student_fees' %}aria-current="page"{% endif %}>Fees</a>
+                    <a href="{% url 'student_timetable' %}" class="nav-portal" {% if request.resolver_match.url_name == 'student_timetable' %}aria-current="page"{% endif %}>Timetable</a>
+                    <a href="{% url 'student_internal_marks' %}" class="nav-portal" {% if request.resolver_match.url_name == 'student_internal_marks' %}aria-current="page"{% endif %}>Internal Marks</a>
+                {% else %}
+                    <a href="{% url 'home' %}" {% if request.resolver_match.url_name == 'home' %}aria-current="page"{% endif %}>Home</a>
+                    <a href="{% url 'register' %}" {% if request.resolver_match.url_name == 'register' %}aria-current="page"{% endif %}>Register</a>
+                    <a href="{% url 'login' %}" {% if request.resolver_match.url_name == 'login' %}aria-current="page"{% endif %}>Student Login</a>
+                    <a href="{% url 'staff_login' %}" {% if request.resolver_match.url_name == 'staff_login' %}aria-current="page"{% endif %}>Staff Login</a>
+                    {% if user.is_authenticated and user.is_staff %}
+                        <a href="{% url 'staff_dashboard' %}" class="nav-dashboard" {% if request.resolver_match.url_name == 'staff_dashboard' %}aria-current="page"{% endif %}>Dashboard</a>
+                        <a href="{% url 'staff_reenroll' %}" {% if request.resolver_match.url_name == 'staff_reenroll' %}aria-current="page"{% endif %}>Re-enroll iris</a>
+                        {% if user.is_superuser %}
+                            <a href="{% url 'staff_register' %}" {% if request.resolver_match.url_name == 'staff_register' %}aria-current="page"{% endif %}>Create staff account</a>
+                        {% endif %}
                     {% endif %}
                 {% endif %}
             </nav>
