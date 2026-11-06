@@ -21,6 +21,12 @@ let liveAttemptCount = 0;
 
 function setStatus(message, type = 'idle') {
   if (!cameraStatus) return;
+  if (type === 'failure' || type === 'camera-blocked' || type === 'success') {
+    cameraStatus.textContent = message;
+    cameraStatus.className = `scanner-status ${type}`;
+    cameraStatus.style.display = 'flex';
+    return;
+  }
   cameraStatus.style.display = 'none';
 }
 
@@ -266,7 +272,7 @@ function scanCurrentFrame() {
         } else if (data.status === 'retry') {
           if (cameraPanel) cameraPanel.classList.add('scanning');
           if (scannerFrameText) scannerFrameText.style.display = 'none';
-          setStatus(data.message || 'Scanning. Hold still.', 'scanning');
+          setStatus(data.message || 'Iris not recognized. Move closer, keep your eyes open and try again.', 'failure');
           if (scannerBadge) {
             scannerBadge.textContent = 'Scanning live';
           }
