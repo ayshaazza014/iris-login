@@ -46,16 +46,16 @@ class Command(BaseCommand):
             else:
                 self.stdout.write(self.style.WARNING(f'Already exists: {user.username}'))
 
-        # Demo portal data (attendance/fees/timetable/assessments/marks) for sample students
-        alice = IrisUser.objects.filter(username='alice').first()
-        if alice:
+        # Demo portal data (attendance/fees) for all registered students
+        students = IrisUser.objects.filter(is_staff=False, is_superuser=False)
+        for student in students:
             AttendanceRecord.objects.update_or_create(
-                student=alice,
+                student=student,
                 subject='AI',
                 defaults={'attended_classes': 12, 'total_classes': 15},
             )
             FeeRecord.objects.update_or_create(
-                student=alice,
+                student=student,
                 fee_type='Tuition Fee',
                 defaults={
                     'amount_due': 50000,
@@ -63,11 +63,12 @@ class Command(BaseCommand):
                     'due_date': None,
                 },
             )
-            self.stdout.write(self.style.SUCCESS('Seeded demo attendance and fee data for alice'))
+        self.stdout.write(self.style.SUCCESS(f'Seeded demo attendance and fee data for {students.count()} registered student(s)'))
 
         # Gate synthetic enrollment behind settings.DEBUG or explicit --demo flag
         allow_demo_enrollment = getattr(settings, 'DEBUG', False) or options.get('demo')
         synthetic_path = Path(settings.BASE_DIR) / 'synthetic_eye.png'
+        alice = IrisUser.objects.filter(username='alice').first()
 
         if not allow_demo_enrollment:
             self.stdout.write(
