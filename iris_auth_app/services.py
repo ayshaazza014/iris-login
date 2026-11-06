@@ -243,6 +243,26 @@ def extract_secondary_template_from_image(image_array):
     return None, None
 
 
+def detect_face_and_iris(image_array):
+    """
+    Returns structured detection metrics: face_detected, eyes_detected, irises, iris_detected.
+    """
+    if image_array is None:
+        return {'face_detected': False, 'face_box': None, 'eyes_detected': 0, 'eyes': [], 'irises': [], 'iris_detected': False}
+    module = load_iris_module()
+    if hasattr(module, 'detect_face_and_iris'):
+        return module.detect_face_and_iris(image_array)
+    eyes = module.detect_eyes(cv2.cvtColor(image_array, cv2.COLOR_BGR2GRAY)) if hasattr(module, 'detect_eyes') else []
+    return {
+        'face_detected': len(eyes) > 0,
+        'face_box': None,
+        'eyes_detected': len(eyes),
+        'eyes': eyes,
+        'irises': [],
+        'iris_detected': len(eyes) > 0,
+    }
+
+
 def extract_all_candidate_templates(image_array):
     """
     Extracts all viable eye templates from the image.

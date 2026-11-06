@@ -163,7 +163,7 @@ class IrisTemplateModelTests(TestCase):
         self.assertContains(response, '>Scan Iris<')
         self.assertContains(
             response,
-            '<input id="capture" type="file" name="capture" accept="image/png,image/jpeg" required>',
+            '<input id="capture" type="file" name="capture" accept="image/png,image/jpeg">',
         )
         self.assertContains(response, 'Choose an iris image below, or optionally use the camera.')
         self.assertContains(response, 'href="/register/"')
@@ -189,7 +189,7 @@ class IrisTemplateModelTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(
             response,
-            '<input id="capture" type="file" name="capture" accept="image/png,image/jpeg" required>',
+            '<input id="capture" type="file" name="capture" accept="image/png,image/jpeg">',
         )
         self.assertContains(response, 'Choose an iris image below, or optionally use the camera.')
 
@@ -1184,3 +1184,21 @@ class FacialFeaturesAndMultimodalTests(TestCase):
             data = response.json()
             self.assertEqual(data.get('status'), 'retry')
             self.assertIn('Iris not recognized', data.get('message', ''))
+
+    def test_detect_face_and_iris_returns_structured_metrics(self):
+        from iris_auth_app.services import detect_face_and_iris
+        res_none = detect_face_and_iris(None)
+        self.assertFalse(res_none['face_detected'])
+        self.assertEqual(res_none['eyes_detected'], 0)
+        self.assertFalse(res_none['iris_detected'])
+
+        sample_path = Path(__file__).resolve().parent.parent / 'synthetic_eye.png'
+        sample_img = cv2.imread(str(sample_path))
+        res_sample = detect_face_and_iris(sample_img)
+        self.assertIn('face_detected', res_sample)
+        self.assertIn('eyes_detected', res_sample)
+        self.assertIn('iris_detected', res_sample)
+        self.assertGreaterEqual(res_sample['eyes_detected'], 1)
+        self.assertTrue(res_sample['iris_detected'])
+        self.assertGreaterEqual(len(res_sample['irises']), 1)
+

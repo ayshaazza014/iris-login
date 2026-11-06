@@ -27,43 +27,52 @@ NORM_H, NORM_W = 64, 512  # normalised iris size (radial x angular)
 
 
 # --------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 # 1. Eye and Face detection
 # --------------------------------------------------------------------------
-def detect_eyes(gray):
+def detect_face_and_iris(image_or_gray):
     """
-    Return list of (x, y, w, h) eye boxes sorted left->right.
-    Hierarchical strategy:
-      1. First check if a face is present; if so, restrict eye search to the
-         anatomical ocular band (upper 18% to 55% of the face ROI), greatly reducing
-         false positives from clothing patterns, nostrils, or backgrounds.
-      2. If eyes are found with standard eye cascade, return them.
-      3. If no eyes are found (e.g. subject is wearing eyeglasses), try the
-         eyeglasses-tolerant cascade.
-      4. If no face is detected (e.g. single-eye macro close-up or synthetic eye),
-         fall back to whole-frame eye detection.
+    Unified multi-scale Face and Iris detection pipeline.
+    Detects face bounding box, ocular regions, and pupil/iris limbus circles.
     """
+    if image_or_gray is None or image_or_gray.size == 0:
+        return {
+            'face_detected': False,
+            'face_box': None,
+            'eyes_detected': 0,
+            'eyes': [],
+            'irises': [],
+            'iris_detected': False,
+        }
+
+    if image_or_gray.ndim == 3:
+        gray = cv2.cvtColor(image_or_gray, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = image_or_gray
+
     h, w = gray.shape
     min_sz = max(40, int(min(h, w) * 0.08))
 
-    face_cascade = cv2.CascadeClassifier(
-        cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-    )
-    eye_cascade = cv2.CascadeClassifier(
-        cv2.data.haarcascades + "haarcascade_eye.xml"
-    )
-    glasses_cascade = cv2.CascadeClassifier(
-        cv2.data.haarcascades + "haarcascade_eye_tree_eyeglasses.xml"
-    )
+    face_default = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    face_alt2 = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_alt2.xml")
+    eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_eye.xml")
+    glasses_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_eye_tree_eyeglasses.xml")
 
+    # 1. Face detection (primary + alt2 fallback)
+    min_face = max(70, int(min(h, w) * 0.18))
+    faces = face_default.detectMultiScale(gray, 1.1, 4, minSize=(min_face, min_face))
+    if len(faces) == 0:
+        faces = face_alt2.detectMultiScale(gray, 1.1, 3, minSize=(min_face, min_face))
+
+    face_box = None
     eyes = []
-    # Try face detection first
-    min_face = max(80, int(min(h, w) * 0.20))
-    faces = face_cascade.detectMultiScale(gray, 1.1, 4, minSize=(min_face, min_face))
 
     if len(faces) > 0:
         faces = sorted(faces, key=lambda f: f[2] * f[3], reverse=True)
         fx, fy, fw, fh = faces[0]
-        # Restrict search to ocular region (upper ~18% to ~55% of face)
+        face_box = (int(fx), int(fy), int(fw), int(fh))
+
+        # Restrict ocular search to upper anatomical band (18% - 58% of face)
         y0 = max(0, int(fy + 0.18 * fh))
         y1 = min(h, int(fy + 0.58 * fh))
         x0 = max(0, int(fx + 0.05 * fw))
@@ -72,25 +81,70 @@ def detect_eyes(gray):
 
         if ocular_roi.size > 0:
             eye_min = max(25, int(fw * 0.10))
-            detected_in_face = eye_cascade.detectMultiScale(
-                ocular_roi, 1.1, 4, minSize=(eye_min, eye_min)
-            )
+            detected_in_face = eye_cascade.detectMultiScale(ocular_roi, 1.1, 4, minSize=(eye_min, eye_min))
             if len(detected_in_face) == 0:
-                detected_in_face = glasses_cascade.detectMultiScale(
-                    ocular_roi, 1.1, 3, minSize=(eye_min, eye_min)
-                )
+                detected_in_face = glasses_cascade.detectMultiScale(ocular_roi, 1.1, 3, minSize=(eye_min, eye_min))
             for (ex, ey, ew, eh) in detected_in_face:
                 eyes.append((x0 + ex, y0 + ey, ew, eh))
 
     if not eyes:
-        # Fallback to direct eye detection across whole frame
+        # Fallback to direct eye detection across whole frame (for macro crops or occluded faces)
         detected = eye_cascade.detectMultiScale(gray, 1.1, 5, minSize=(min_sz, min_sz))
         if len(detected) == 0:
             detected = glasses_cascade.detectMultiScale(gray, 1.1, 3, minSize=(min_sz, min_sz))
         eyes = [tuple(e) for e in detected]
 
     eyes = sorted(eyes, key=lambda e: e[2] * e[3], reverse=True)[:2]
-    return sorted([tuple(e) for e in eyes], key=lambda e: e[0])
+    eyes = sorted([tuple(e) for e in eyes], key=lambda e: e[0])
+
+    # If eyes are present but face was not detected (e.g. mask or hijab), reconstruct upper face box
+    if face_box is None and len(eyes) >= 2:
+        e1, e2 = eyes[0], eyes[1]
+        cx1, cy1 = e1[0] + e1[2] / 2.0, e1[1] + e1[3] / 2.0
+        cx2, cy2 = e2[0] + e2[2] / 2.0, e2[1] + e2[3] / 2.0
+        iod = np.hypot(cx2 - cx1, cy2 - cy1)
+        est_fw = int(iod * 2.2)
+        est_fh = int(est_fw * 1.3)
+        est_fx = max(0, int((cx1 + cx2) / 2.0 - est_fw / 2.0))
+        est_fy = max(0, int((cy1 + cy2) / 2.0 - 0.38 * est_fh))
+        face_box = (est_fx, est_fy, min(w - est_fx, est_fw), min(h - est_fy, est_fh))
+
+    # 2. Iris and Pupil localization for each detected eye
+    irises = []
+    for ex, ey, ew, eh in eyes:
+        pad = int(0.15 * ew)
+        crop = gray[max(0, ey - pad):min(h, ey + eh + pad), max(0, ex - pad):min(w, ex + ew + pad)]
+        if crop.size > 0:
+            scale = 1.0
+            if crop.shape[1] < 300:
+                scale = 300 / crop.shape[1]
+                crop_sc = cv2.resize(crop, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+            else:
+                crop_sc = crop
+            iris = find_iris(crop_sc)
+            pupil = find_pupil(crop_sc, iris)
+            irises.append({
+                'eye_box': (ex, ey, ew, eh),
+                'iris_circle': (int(iris[0] / scale), int(iris[1] / scale), int(iris[2] / scale)),
+                'pupil_circle': (int(pupil[0] / scale), int(pupil[1] / scale), int(pupil[2] / scale)),
+            })
+
+    return {
+        'face_detected': face_box is not None,
+        'face_box': face_box,
+        'eyes_detected': len(eyes),
+        'eyes': eyes,
+        'irises': irises,
+        'iris_detected': len(irises) > 0,
+    }
+
+
+def detect_eyes(gray):
+    """
+    Return list of (x, y, w, h) eye boxes sorted left->right.
+    Preserves 100% backward compatibility for all pipeline callers.
+    """
+    return detect_face_and_iris(gray)['eyes']
 
 
 # --------------------------------------------------------------------------

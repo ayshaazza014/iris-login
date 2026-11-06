@@ -20,6 +20,7 @@ from django.views.decorators.http import require_http_methods
 from .models import IrisTemplate, IrisUser
 from .services import (
     TEMPLATE_ENCODING_VERSION,
+    detect_face_and_iris,
     ensure_iris_template_for_user,
     extract_facial_features,
     extract_secondary_template_from_image,
@@ -189,6 +190,20 @@ def _inspect_image_dimensions(data):
             return width, height
 
     return None
+
+
+def _get_detection_payload(image):
+    if image is None:
+        return {'face_detected': False, 'eyes_detected': 0, 'iris_detected': False}
+    try:
+        det = detect_face_and_iris(image)
+        return {
+            'face_detected': bool(det.get('face_detected')),
+            'eyes_detected': int(det.get('eyes_detected', 0)),
+            'iris_detected': bool(det.get('iris_detected')),
+        }
+    except Exception:
+        return {'face_detected': False, 'eyes_detected': 0, 'iris_detected': False}
 
 
 def _decode_capture(uploaded_file):
@@ -413,6 +428,7 @@ def staff_login_view(request):
         identifier = request.POST.get('identifier', '').strip()
         try:
             image = _decode_capture(request.FILES.get('capture'))
+            det_info = _get_detection_payload(image) if is_ajax else None
             if identifier:
                 user = verify_iris_for_user(identifier, image)
                 if user is not None:
@@ -426,12 +442,15 @@ def staff_login_view(request):
 
                     login(request, user)
                     if is_ajax:
-                        return JsonResponse({
+                        resp_data = {
                             'status': 'success',
                             'redirect_url': '/staff/dashboard/',
                             'username': user.username,
                             'display_name': user.display_name or user.username,
-                        })
+                        }
+                        if det_info:
+                            resp_data['detection'] = det_info
+                        return JsonResponse(resp_data)
                     messages.success(request, f'Staff iris verification succeeded for {user.display_name or user.username}.')
                     return redirect('staff_dashboard')
 
@@ -459,12 +478,15 @@ def staff_login_view(request):
 
             login(request, user)
             if is_ajax:
-                return JsonResponse({
+                resp_data = {
                     'status': 'success',
                     'redirect_url': '/staff/dashboard/',
                     'username': user.username,
                     'display_name': user.display_name or user.username,
-                })
+                }
+                if det_info:
+                    resp_data['detection'] = det_info
+                return JsonResponse(resp_data)
             messages.success(request, f'Staff iris verification succeeded for {user.display_name or user.username}.')
             return redirect('staff_dashboard')
         except ValidationError as exc:
@@ -639,23 +661,30 @@ def login_view(request):
 
         try:
             image = _decode_capture(uploaded_file)
+            det_info = _get_detection_payload(image) if is_ajax else None
             if identifier:
                 user = verify_iris_for_user(identifier, image)
                 if user is not None and not user.is_staff and not user.is_superuser and user.is_active:
                     login(request, user)
                     if is_ajax:
-                        return JsonResponse({
+                        resp_data = {
                             'status': 'success',
                             'redirect_url': '/dashboard/',
                             'username': user.username,
                             'display_name': user.display_name or user.username,
-                        })
+                        }
+                        if det_info:
+                            resp_data['detection'] = det_info
+                        return JsonResponse(resp_data)
                     messages.success(request, f'Iris verification succeeded for {user.display_name or user.username}.')
                     return redirect('dashboard')
 
                 msg = _iris_login_failure_message('no_match', staff_only=False)
                 if is_ajax:
-                    return JsonResponse({'status': 'retry', 'message': msg})
+                    resp_data = {'status': 'retry', 'message': msg}
+                    if det_info:
+                        resp_data['detection'] = det_info
+                    return JsonResponse(resp_data)
                 messages.error(request, msg)
                 return render(request, 'iris_auth_app/login.html')
 
@@ -666,18 +695,24 @@ def login_view(request):
             if user is not None:
                 login(request, user)
                 if is_ajax:
-                    return JsonResponse({
+                    resp_data = {
                         'status': 'success',
                         'redirect_url': '/dashboard/',
                         'username': user.username,
                         'display_name': user.display_name or user.username,
-                    })
+                    }
+                    if det_info:
+                        resp_data['detection'] = det_info
+                    return JsonResponse(resp_data)
                 messages.success(request, f'Iris verification succeeded for {user.display_name or user.username}.')
                 return redirect('dashboard')
 
             msg = _iris_login_failure_message(failure_reason, staff_only=False)
             if is_ajax:
-                return JsonResponse({'status': 'retry', 'message': msg})
+                resp_data = {'status': 'retry', 'message': msg}
+                if det_info:
+                    resp_data['detection'] = det_info
+                return JsonResponse(resp_data)
             messages.error(request, msg)
             return render(request, 'iris_auth_app/login.html')
 
