@@ -21,7 +21,9 @@ let liveAttemptCount = 0;
 
 function setStatus(message, type = 'idle') {
   if (!cameraStatus) return;
-  cameraStatus.style.display = 'none';
+  cameraStatus.textContent = message;
+  cameraStatus.className = `scanner-status ${type}`;
+  cameraStatus.style.display = 'flex';
 }
 
 function updateButtonStates(running) {
@@ -31,8 +33,22 @@ function updateButtonStates(running) {
   if (stopCameraBtn) {
     stopCameraBtn.style.display = running ? 'inline-flex' : 'none';
   }
+  const hasFile = Boolean(captureInput && captureInput.files && captureInput.files.length);
   if (manualScanBtn) {
-    manualScanBtn.disabled = !running;
+    manualScanBtn.disabled = !running && !hasFile;
+    if (running || hasFile) {
+      manualScanBtn.className = 'primary-btn';
+    } else {
+      manualScanBtn.className = 'secondary-btn';
+    }
+  }
+  if (captureBtn) {
+    captureBtn.disabled = !running;
+    if (running) {
+      captureBtn.className = 'primary-btn';
+    } else {
+      captureBtn.className = 'secondary-btn';
+    }
   }
 }
 
@@ -49,9 +65,12 @@ async function startCamera() {
   if (captureInput) captureInput.value = '';
   if (cameraPreview) cameraPreview.src = '';
   if (captureBtn) captureBtn.disabled = true;
-  if (retakeBtn) retakeBtn.disabled = true;
+  if (retakeBtn) {
+    retakeBtn.disabled = true;
+    retakeBtn.style.display = 'none';
+  }
   updateButtonStates(false);
-  setStatus('Press Start Live Camera to begin.', 'idle');
+  setStatus('Starting camera… Please hold steady.', 'idle');
 
   try {
     let streamAttempt = null;
@@ -88,10 +107,8 @@ async function startCamera() {
       cameraPanel.classList.remove('scanning');
     }
     if (scannerFrameText) {
-    scannerFrameText.style.display = 'none';
-  }
-
-    if (captureBtn) captureBtn.disabled = false;
+      scannerFrameText.style.display = 'none';
+    }
 
     updateButtonStates(true);
     if (authForm && authForm.dataset.autoCapture === 'true') {
@@ -100,7 +117,7 @@ async function startCamera() {
       startLiveScanner();
       if (cameraPanel) cameraPanel.classList.add('scanning');
     } else {
-      setStatus('Camera is on. Center your eye in the frame, then press Scan Iris.', 'camera-ready');
+      setStatus('Camera is on. Position your eye within the frame and click Capture Iris.', 'camera-ready');
     }
   } catch (error) {
     stopCamera();
@@ -138,7 +155,7 @@ function stopCamera() {
 
   updateButtonStates(false);
   if (!isSubmitting) {
-    setStatus('Camera is off. Press Start Live Camera to begin.', 'idle');
+    setStatus('Choose an iris image below, or optionally use the camera.', 'idle');
   }
 }
 
@@ -206,6 +223,11 @@ function scanCurrentFrame() {
         formData.append('csrfmiddlewaretoken', csrfInput.value);
       }
 
+      const identifierInput = authForm ? authForm.querySelector('input[name="identifier"]') : null;
+      if (identifierInput && identifierInput.value.trim()) {
+        formData.append('identifier', identifierInput.value.trim());
+      }
+
       const targetUrl = (authForm && authForm.action) ? authForm.action : window.location.pathname;
       const response = await fetch(targetUrl, {
         method: 'POST',
@@ -233,7 +255,7 @@ function scanCurrentFrame() {
           if (scannerBadge) {
             scannerBadge.textContent = '✓ Verified!';
           }
-          setStatus('Identity verified. Redirecting.', 'success');
+          setStatus('Identity verified. Redirecting…', 'success');
           setTimeout(() => {
             const redirectUrl = data.redirect_url || '/dashboard/';
             if (typeof redirectUrl === 'string' && redirectUrl.startsWith('/') && !redirectUrl.startsWith('//')) {
@@ -246,7 +268,7 @@ function scanCurrentFrame() {
         } else if (data.status === 'retry') {
           if (cameraPanel) cameraPanel.classList.add('scanning');
           if (scannerFrameText) scannerFrameText.style.display = 'none';
-          setStatus('Scanning. Hold still.', 'scanning');
+          setStatus(data.message || 'Scanning. Hold still.', 'scanning');
           if (scannerBadge) {
             scannerBadge.textContent = 'Scanning live';
           }
@@ -255,7 +277,7 @@ function scanCurrentFrame() {
         const retryHeader = response.headers.get('Retry-After');
         const retrySec = retryHeader ? parseInt(retryHeader, 10) : 5;
         const backoffMs = Math.max(retrySec * 1000, 3000);
-        setStatus('Scanning. Hold still.', 'scanning');
+        setStatus(`Rate limit reached. Pausing for ${Math.round(backoffMs / 1000)}s…`, 'camera-blocked');
         if (scannerBadge) scannerBadge.textContent = `Rate limited. Pausing ${Math.round(backoffMs / 1000)}s…`;
         await new Promise((resolve) => setTimeout(resolve, backoffMs));
       } else {
@@ -272,7 +294,7 @@ function scanCurrentFrame() {
 
 function captureFrame() {
   if (!cameraPreview || !cameraPreview.videoWidth) {
-    setStatus('Camera is not ready yet. Please start the camera first.', 'error');
+    setStatus('Camera is not ready yet. Please start the camera first.', 'failure');
     return false;
   }
 
@@ -282,7 +304,7 @@ function captureFrame() {
 
   const context = canvas.getContext('2d');
   if (!context) {
-    setStatus('Could not capture an image. Please restart the camera and try again.', 'error');
+    setStatus('Could not capture an image. Please restart the camera and try again.', 'failure');
     return false;
   }
 
@@ -290,7 +312,7 @@ function captureFrame() {
     context.drawImage(cameraPreview, 0, 0, canvas.width, canvas.height);
     captureDataUrl = canvas.toDataURL('image/png');
   } catch (error) {
-    setStatus('Camera capture failed. Restart the camera and try again.', 'error');
+    setStatus('Camera capture failed. Restart the camera and try again.', 'failure');
     return false;
   }
 
@@ -299,9 +321,12 @@ function captureFrame() {
     cameraPreview.src = captureDataUrl;
   }
 
-  setStatus(`Image captured (${canvas.width} × ${canvas.height}, PNG). Submit it for iris verification.`, 'success');
+  setStatus(`Image captured (${canvas.width} × ${canvas.height}). Ready to submit.`, 'success');
   if (captureBtn) captureBtn.disabled = true;
-  if (retakeBtn) retakeBtn.disabled = false;
+  if (retakeBtn) {
+    retakeBtn.disabled = false;
+    retakeBtn.style.display = 'inline-flex';
+  }
 
   if (captureInput) {
     const blob = dataURLtoBlob(captureDataUrl);
@@ -312,6 +337,7 @@ function captureFrame() {
   }
 
   stopCamera();
+  updateButtonStates(false);
   return Boolean(captureInput && captureInput.files.length);
 }
 
@@ -334,7 +360,7 @@ if (stopCameraBtn) {
   stopCameraBtn.addEventListener('click', () => {
     stopCamera();
     updateButtonStates(false);
-    setStatus('Camera is off. Press Start Live Camera to begin.', 'idle');
+    setStatus('Choose an iris image below, or optionally use the camera.', 'idle');
     if (cameraPanel) {
       cameraPanel.classList.add('camera-off');
       cameraPanel.classList.remove('camera-ready');
@@ -364,10 +390,11 @@ if (retakeBtn) {
       cameraPreview.src = '';
     }
     if (captureInput) captureInput.value = '';
-    setStatus('Ready to capture a new image.', 'info');
+    setStatus('Ready to capture a new image.', 'idle');
     startCamera();
   });
   retakeBtn.disabled = true;
+  retakeBtn.style.display = 'none';
 }
 
 if (captureInput) {
@@ -379,7 +406,7 @@ if (captureInput) {
     if (cameraPreview) {
       if (selectedFile.type && !selectedFile.type.startsWith('image/')) {
         cameraPreview.src = '';
-        setStatus('Please select a valid image file (PNG or JPEG).', 'error');
+        setStatus('Please select a valid image file (PNG or JPEG).', 'failure');
         return;
       }
       const reader = new FileReader();
@@ -389,18 +416,25 @@ if (captureInput) {
       };
       reader.readAsDataURL(selectedFile);
     }
-    setStatus(`Image selected: ${selectedFile.name}. Verify the preview or submit for iris verification.`, 'success');
+    setStatus(`Image selected: ${selectedFile.name}. Click Scan to verify.`, 'success');
     if (captureBtn) captureBtn.disabled = true;
-    if (retakeBtn) retakeBtn.disabled = false;
+    if (retakeBtn) {
+      retakeBtn.disabled = false;
+      retakeBtn.style.display = 'inline-flex';
+    }
+    updateButtonStates(false);
   });
 }
 
 if (authForm) {
   const submitButton = authForm.querySelector('button[type="submit"]');
-  if (submitButton) {
-    submitButton.addEventListener('pointerdown', () => {
-      if (authForm.dataset.autoCapture === 'true' && (!captureInput || !captureInput.files.length)) {
-        captureFrame();
+
+  if (manualScanBtn) {
+    manualScanBtn.addEventListener('click', (event) => {
+      if (authForm.dataset.autoCapture === 'true' && stream) {
+        event.preventDefault();
+        setStatus('Scanning live iris frame…', 'scanning');
+        scanCurrentFrame();
       }
     });
   }
@@ -411,42 +445,32 @@ if (authForm) {
       return;
     }
 
-    if (authForm.dataset.autoCapture === 'true') {
-      if (!stream) {
-        event.preventDefault();
-        setStatus('Camera is off. Press Start Live Camera to begin.', 'idle');
-        updateButtonStates(false);
-        return;
-      }
-      if (manualScanBtn) manualScanBtn.disabled = true;
-      setStatus('Scanning. Hold still.', 'scanning');
-      if (cameraPanel) cameraPanel.classList.add('scanning');
-      return;
-    }
-
-    if (authForm.dataset.autoCapture === 'true' && (!captureInput || !captureInput.files.length)) {
-      if (!captureFrame()) {
-        event.preventDefault();
-        return;
-      }
-    }
-
-    if (!captureInput || !captureInput.files.length) {
+    if (authForm.dataset.autoCapture === 'true' && stream) {
       event.preventDefault();
-      setStatus('Start the live camera to scan your iris.', 'idle');
+      setStatus('Scanning live iris frame…', 'scanning');
+      scanCurrentFrame();
       return;
     }
 
-    isSubmitting = true;
-    setStatus('Scanning. Hold still.', 'scanning');
-    if (cameraPanel) cameraPanel.classList.add('scanning');
-    if (scannerFrameText) scannerFrameText.style.display = 'none';
-    if (submitButton) {
-      if (!submitButton.dataset.originalText) {
-        submitButton.dataset.originalText = submitButton.textContent;
+    if (captureInput && captureInput.files && captureInput.files.length > 0) {
+      isSubmitting = true;
+      setStatus('Processing iris verification. Please wait…', 'scanning');
+      if (cameraPanel) cameraPanel.classList.add('scanning');
+      if (submitButton) {
+        if (!submitButton.dataset.originalText) {
+          submitButton.dataset.originalText = submitButton.textContent;
+        }
+        submitButton.disabled = true;
+        submitButton.textContent = 'Processing…';
       }
-      submitButton.disabled = true;
-      submitButton.textContent = 'Processing…';
+      return;
+    }
+
+    event.preventDefault();
+    if (authForm.dataset.autoCapture === 'true') {
+      setStatus('Start the live camera or choose an iris image to continue.', 'idle');
+    } else {
+      setStatus('Please upload an iris image or capture one with the camera before continuing.', 'failure');
     }
   });
 }
@@ -479,5 +503,5 @@ window.addEventListener('pageshow', () => {
     cameraPanel.classList.remove('matched');
   }
   if (scannerFrameText) scannerFrameText.style.display = 'none';
-  setStatus('Camera is off. Press Start Live Camera to begin.', 'idle');
+  setStatus('Choose an iris image below, or optionally use the camera.', 'idle');
 });

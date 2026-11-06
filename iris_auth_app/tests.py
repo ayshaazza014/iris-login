@@ -1154,3 +1154,33 @@ class FacialFeaturesAndMultimodalTests(TestCase):
                 self.assertEqual(identified_user.username, 'multimodal_user')
                 self.assertIsNone(failure_reason)
 
+
+    def test_staff_login_supports_ajax_requests(self):
+        staff = IrisUser.objects.create_user(
+            username='ajax_staff',
+            display_name='Ajax Staff',
+            is_staff=True,
+        )
+        with patch('iris_auth_app.views.identify_user_from_iris_result', return_value=(staff, None)):
+            response = self.client.post(
+                '/staff/login/',
+                {'capture': make_capture(), 'ajax': 'true'},
+                HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+            )
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual(data.get('status'), 'success')
+            self.assertEqual(data.get('redirect_url'), '/staff/dashboard/')
+            self.assertEqual(data.get('username'), 'ajax_staff')
+
+    def test_staff_login_ajax_failure_returns_retry_json(self):
+        with patch('iris_auth_app.views.identify_user_from_iris_result', return_value=(None, 'no_match')):
+            response = self.client.post(
+                '/staff/login/',
+                {'capture': make_capture(), 'ajax': 'true'},
+                HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+            )
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual(data.get('status'), 'retry')
+            self.assertIn('Iris not recognized', data.get('message', ''))

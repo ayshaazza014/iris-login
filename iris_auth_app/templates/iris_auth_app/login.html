@@ -46,7 +46,7 @@
         <div class="form-actions">
             <button type="button" id="start-camera" class="primary-btn">Start Live Camera</button>
             <button type="button" id="stop-camera" class="stop-link" style="display:none;">Stop camera</button>
-            <button type="submit" id="manual-scan-btn" class="primary-btn" disabled>Scan Iris</button>
+            <button type="submit" id="manual-scan-btn" class="secondary-btn" disabled>Scan Iris</button>
         </div>
         <div class="input-group">
             <label for="capture">Iris image (PNG or JPEG)</label>
@@ -57,6 +57,7 @@
 
         <div class="form-actions">
             <a href="{% url 'register' %}" class="secondary-btn">Register</a>
+            <a href="{% url 'staff_login' %}" class="secondary-btn">Staff Login</a>
             <a href="{% url 'home' %}" class="text-link">Back to welcome page</a>
         </div>
     </form>

@@ -222,6 +222,19 @@ Verification evidence (already runs clean, cited as baseline):
 
 ---
 
+### BUG-027 — Login and registration flow breakage: button event hijacking, file upload blocking, missing AJAX staff endpoint, and collapsed camera viewport
+- **File:Line:** iris_auth_app/static/iris_auth_app/camera.js, iris_auth_app/views.py:400-480, iris_auth_app/templates/iris_auth_app/register.html, staff_register.html, staff_reenroll.html, login.html, staff_login.html, base.html.
+- **Trigger:** Attempting live biometric scanning on staff login, attempting manual submit when selecting a static image file with camera inactive, or visiting registration pages where video preview elements collapsed.
+- **Impact:** 
+  1. Staff login live scanning failed with SyntaxError: Unexpected token '<' because staff_login_view did not return JSON for AJAX requests.
+  2. In camera.js, a pointerdown listener on manual submit stopped the video stream, causing the subsequent form submit handler to execute event.preventDefault() and block submission when uploading static image files.
+  3. Live auto-scan in camera.js omitted the identifier field in formData, disabling 1:1 verification during scanning.
+  4. .camera-panel in register.html, staff_register.html, and staff_reenroll.html lacked the .scanner-frame wrapper, collapsing absolutely positioned <video> elements to 0 height.
+  5. UI button hierarchy issues: manual-scan-btn had misleading styling when inactive and lacked visual status feedback. Navigation links between student/staff logins and logout button on base navigation were incomplete.
+- **Suggested Fix:** Add full AJAX handling to staff_login_view with JSON response contracts. Fix camera.js event handling to decouple live stream scanning from file-upload submission, pass identifier in live scan payloads, and properly manage button enabled/disabled states. Add .scanner-frame containers with reticles to registration templates, harmonize buttons and status indicators, and add navigation links.
+- **Confidence:** High.
+- **Status:** Fixed (implemented JSON AJAX handling for staff login, revised camera.js event pipeline, added scanner-frame wrappers to all camera templates, harmonized UI button states and navigation).
+
 ## ✅ Verified-solid (audit credits — do not regress)
 
 - Rate limiting runs **before** any image decoding (all endpoints' 429 path precedes `_decode_capture` — `views.py:212-213`, `280-282`, `448-456`, `520-521`).
@@ -235,7 +248,7 @@ Verification evidence (already runs clean, cited as baseline):
 - Unknown/failed matching → fail-closed session refusal everywhere (matches TRD `trd.md:101-102`); no session is created on mismatch.
 - Home page carries the required no-accuracy/no-liveness disclaimer (`templates/iris_auth_app/home.html`); README honestly documents setup and known limitations (TRD §9/README contract observed).
 - Repo hygiene core is correct: `.env` not tracked, `db.sqlite3` not tracked, git status clean, all 47 tracked files reviewed, no committed biometric data of real persons.
-- Tests are thorough for their scope: 75 Django tests + 11 pytest (template format, Hamming math, mask occlusion, gabor cache, pupil fallbacks, and multimodal facial/periocular score fusion), and pass cleanly.
+- Tests are thorough for their scope: 77 Django tests + 11 pytest (template format, Hamming math, mask occlusion, gabor cache, pupil fallbacks, and multimodal facial/periocular score fusion), and pass cleanly.
 
 ---
 

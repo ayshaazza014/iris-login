@@ -391,8 +391,24 @@ def register_view(request):
 @require_http_methods(["GET", "POST"])
 def staff_login_view(request):
     if request.method == 'POST':
-        if is_rate_limited(request, action='staff_login'):
-            return HttpResponse('Too many attempts. Please try again later.', status=429)
+        is_ajax = (
+            request.headers.get('x-requested-with') == 'XMLHttpRequest'
+            or 'application/json' in request.headers.get('accept', '')
+            or request.POST.get('ajax') == 'true'
+        )
+
+        max_attempts = 60 if is_ajax else None
+        if is_rate_limited(request, action='staff_login', max_attempts=max_attempts):
+            if is_ajax:
+                resp = JsonResponse(
+                    {'status': 'rate_limited', 'message': 'Too many live scan attempts. Pausing briefly...'},
+                    status=429,
+                )
+                resp['Retry-After'] = '5'
+                return resp
+            resp = HttpResponse('Too many attempts. Please try again later.', status=429)
+            resp['Retry-After'] = '5'
+            return resp
 
         identifier = request.POST.get('identifier', '').strip()
         try:
@@ -402,34 +418,64 @@ def staff_login_view(request):
                 if user is not None:
                     if not user.is_staff or not user.is_active:
                         logger.warning('Iris identification returned a non-staff user for staff login.')
-                        messages.error(request, 'Iris not recognized or not authorized. Please try again.')
+                        msg = 'Iris not recognized or not authorized. Please try again.'
+                        if is_ajax:
+                            return JsonResponse({'status': 'retry', 'message': msg})
+                        messages.error(request, msg)
                         return render(request, 'iris_auth_app/staff_login.html')
 
                     login(request, user)
+                    if is_ajax:
+                        return JsonResponse({
+                            'status': 'success',
+                            'redirect_url': '/staff/dashboard/',
+                            'username': user.username,
+                            'display_name': user.display_name or user.username,
+                        })
                     messages.success(request, f'Staff iris verification succeeded for {user.display_name or user.username}.')
                     return redirect('staff_dashboard')
 
-                messages.error(request, _iris_login_failure_message('no_match', staff_only=True))
+                msg = _iris_login_failure_message('no_match', staff_only=True)
+                if is_ajax:
+                    return JsonResponse({'status': 'retry', 'message': msg})
+                messages.error(request, msg)
                 return render(request, 'iris_auth_app/staff_login.html')
 
             user, failure_reason = identify_user_from_iris_result(image, staff_only=True)
             if user is None:
-                messages.error(request, _iris_login_failure_message(failure_reason, staff_only=True))
+                msg = _iris_login_failure_message(failure_reason, staff_only=True)
+                if is_ajax:
+                    return JsonResponse({'status': 'retry', 'message': msg})
+                messages.error(request, msg)
                 return render(request, 'iris_auth_app/staff_login.html')
 
             if not user.is_staff:
                 logger.warning('Iris identification returned a non-staff user for staff login.')
-                messages.error(request, 'Iris not recognized or not authorized. Please try again.')
+                msg = 'Iris not recognized or not authorized. Please try again.'
+                if is_ajax:
+                    return JsonResponse({'status': 'retry', 'message': msg})
+                messages.error(request, msg)
                 return render(request, 'iris_auth_app/staff_login.html')
 
             login(request, user)
+            if is_ajax:
+                return JsonResponse({
+                    'status': 'success',
+                    'redirect_url': '/staff/dashboard/',
+                    'username': user.username,
+                    'display_name': user.display_name or user.username,
+                })
             messages.success(request, f'Staff iris verification succeeded for {user.display_name or user.username}.')
             return redirect('staff_dashboard')
         except ValidationError as exc:
+            if is_ajax:
+                return JsonResponse({'status': 'retry', 'message': str(exc)})
             messages.error(request, str(exc))
             return render(request, 'iris_auth_app/staff_login.html')
         except (cv2.error, ImportError, OSError, TypeError, ValueError, AttributeError):
             logger.exception('Unexpected error while processing a staff iris login.')
+            if is_ajax:
+                return JsonResponse({'status': 'retry', 'message': 'Scan processing issue. Retrying...'})
             messages.error(request, 'An unexpected error occurred while processing the iris image.')
             return render(request, 'iris_auth_app/staff_login.html')
 

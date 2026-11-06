@@ -38,6 +38,10 @@
                     {% if user.is_superuser %}
                         <a href="{% url 'staff_register' %}">Create staff account</a>
                     {% endif %}
+                    <form method="post" action="{% url 'logout' %}" style="display:inline;margin:0;padding:0;">
+                        {% csrf_token %}
+                        <button type="submit" class="secondary-btn" style="padding:4px 12px;font-size:0.85rem;min-height:36px;cursor:pointer;">Log out</button>
+                    </form>
                 {% endif %}
             </nav>
         </header>
