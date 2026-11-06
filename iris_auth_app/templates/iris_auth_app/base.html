@@ -20,8 +20,8 @@
             </a>
             <nav class="nav" aria-label="Main navigation">
                 <a href="{% url 'home' %}" {% if request.resolver_match.url_name == 'home' %}aria-current="page"{% endif %}>Home</a>
-                <a href="{% url 'login' %}" {% if request.resolver_match.url_name == 'login' %}aria-current="page"{% endif %}>Student Login</a>
                 <a href="{% url 'register' %}" {% if request.resolver_match.url_name == 'register' %}aria-current="page"{% endif %}>Register</a>
+                <a href="{% url 'login' %}" {% if request.resolver_match.url_name == 'login' %}aria-current="page"{% endif %}>Student Login</a>
                 <a href="{% url 'staff_login' %}" {% if request.resolver_match.url_name == 'staff_login' %}aria-current="page"{% endif %}>Staff Login</a>
                 {% if user.is_authenticated %}
                     {% if user.is_staff %}
@@ -38,10 +38,6 @@
                     {% if user.is_superuser %}
                         <a href="{% url 'staff_register' %}">Create staff account</a>
                     {% endif %}
-                    <form method="post" action="{% url 'logout' %}" style="display:inline;margin:0;padding:0;">
-                        {% csrf_token %}
-                        <button type="submit" class="secondary-btn" style="padding:4px 12px;font-size:0.85rem;min-height:36px;cursor:pointer;">Log out</button>
-                    </form>
                 {% endif %}
             </nav>
         </header>

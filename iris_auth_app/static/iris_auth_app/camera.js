@@ -21,9 +21,7 @@ let liveAttemptCount = 0;
 
 function setStatus(message, type = 'idle') {
   if (!cameraStatus) return;
-  cameraStatus.textContent = message;
-  cameraStatus.className = `scanner-status ${type}`;
-  cameraStatus.style.display = 'flex';
+  cameraStatus.style.display = 'none';
 }
 
 function updateButtonStates(running) {
