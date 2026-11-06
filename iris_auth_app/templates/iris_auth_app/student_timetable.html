@@ -1,4 +1,4 @@
-{% extends 'iris_auth_app/base.html' %}
+﻿{% extends 'iris_auth_app/base.html' %}
 {% block title %}Timetable | SmartCampus{% endblock %}
 {% block content %}
 <section class="dashboard-shell">
@@ -6,38 +6,47 @@
         <div>
             <span class="section-eyebrow">STUDENT PORTAL</span>
             <h1>Weekly Timetable</h1>
-            <p>Class schedule for {{ user.display_name|default:user.username }}.</p>
+            <p>Class schedule for {{ user.display_name|default:user.username }} (Mon–Fri, 9:00 AM – 4:00 PM).</p>
         </div>
         <a href="{% url 'dashboard' %}" class="secondary-btn">Back to Dashboard</a>
     </header>
     <article class="future-panel">
-        {% for day, entries in timetable_by_day.items %}
-            <h3 style="margin-top:18px;">{% if day == 'Mon' %}Monday{% elif day == 'Tue' %}Tuesday{% elif day == 'Wed' %}Wednesday{% elif day == 'Thu' %}Thursday{% elif day == 'Fri' %}Friday{% elif day == 'Sat' %}Saturday{% else %}{{ day }}{% endif %}</h3>
-            {% if entries %}
-            <table style="width:100%; border-collapse: collapse;">
+        <div style="overflow-x:auto;">
+            <table style="width:100%; border-collapse:collapse; min-width:720px;">
                 <thead>
-                    <tr style="text-align:left; border-bottom:1px solid var(--campus-border);">
-                        <th style="padding:10px;">Time</th>
-                        <th style="padding:10px;">Subject</th>
-                        <th style="padding:10px;">Room</th>
-                        <th style="padding:10px;">Faculty</th>
+                    <tr style="background:var(--campus-secondary, #e8f5ef);">
+                        <th style="padding:12px; border:1px solid var(--campus-border); text-align:left; width:140px;">Time</th>
+                        {% for code, label in day_headers %}
+                        <th style="padding:12px; border:1px solid var(--campus-border); text-align:center;">{{ label }}</th>
+                        {% endfor %}
                     </tr>
                 </thead>
                 <tbody>
-                    {% for entry in entries %}
-                    <tr style="border-bottom:1px solid var(--campus-border);">
-                        <td style="padding:10px;">{{ entry.start_time }} - {{ entry.end_time }}</td>
-                        <td style="padding:10px;">{{ entry.subject }}</td>
-                        <td style="padding:10px;">{{ entry.room|default:"-" }}</td>
-                        <td style="padding:10px;">{{ entry.faculty|default:"-" }}</td>
+                    {% for row in grid %}
+                    <tr {% if row.is_lunch %}style="background:#fff8e6;"{% endif %}>
+                        <td style="padding:12px; border:1px solid var(--campus-border); font-weight:600; white-space:nowrap;">
+                            {{ row.time }}<br><small style="font-weight:400; color:var(--text-muted, #666);">{{ row.label }}</small>
+                        </td>
+                        {% if row.is_lunch %}
+                        <td colspan="{{ day_headers|length }}" style="padding:12px; border:1px solid var(--campus-border); text-align:center; font-weight:600; letter-spacing:0.04em;">LUNCH BREAK</td>
+                        {% else %}
+                            {% for cell in row.cells %}
+                            <td style="padding:12px; border:1px solid var(--campus-border); text-align:center; vertical-align:middle;">
+                                {% if cell.entry %}
+                                    <div style="font-weight:600;">{{ cell.entry.subject }}</div>
+                                    {% if cell.entry.room %}<div style="font-size:0.9em; color:var(--text-muted, #666);">{{ cell.entry.room }}</div>{% endif %}
+                                    {% if cell.entry.faculty %}<div style="font-size:0.85em; color:var(--text-muted, #666);">{{ cell.entry.faculty }}</div>{% endif %}
+                                {% else %}
+                                    <span style="color:var(--text-muted, #999);">-</span>
+                                {% endif %}
+                            </td>
+                            {% endfor %}
+                        {% endif %}
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
-            {% else %}
-            <p>No classes scheduled.</p>
-            {% endif %}
-        {% endfor %}
+        </div>
     </article>
 </section>
 {% endblock %}

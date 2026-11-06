@@ -4,7 +4,9 @@ import cv2
 from django.conf import settings
 from django.core.management.base import BaseCommand
 
-from iris_auth_app.models import AttendanceRecord, FeeRecord, IrisUser
+from datetime import time
+
+from iris_auth_app.models import AttendanceRecord, FeeRecord, IrisUser, TimetableEntry
 from iris_auth_app.services import (
     ensure_iris_template_for_user,
     extract_facial_features,
@@ -71,8 +73,28 @@ class Command(BaseCommand):
                     'due_date': None,
                 },
             )
+
+            # Demo timetable (Mon-Fri, 9am-4pm, 1hr periods, lunch 1-2pm)
+            TimetableEntry.objects.filter(student=student).delete()
+            timetable = {
+                'Mon': [('09:00','10:00','AI','R201',''), ('10:00','11:00','EVS','R201',''), ('11:00','12:00','GT','R202',''), ('12:00','13:00','CN','Lab 1',''), ('14:00','15:00','SC','R203',''), ('15:00','16:00','AI','R201','')],
+                'Tue': [('09:00','10:00','CN','Lab 1',''), ('10:00','11:00','AI','R201',''), ('11:00','12:00','SC','R203',''), ('12:00','13:00','EVS','R201',''), ('14:00','15:00','GT','R202',''), ('15:00','16:00','CN','Lab 1','')],
+                'Wed': [('09:00','10:00','GT','R202',''), ('10:00','11:00','SC','R203',''), ('11:00','12:00','AI','R201',''), ('12:00','13:00','GT','R202',''), ('14:00','15:00','EVS','R201',''), ('15:00','16:00','SC','R203','')],
+                'Thu': [('09:00','10:00','EVS','R201',''), ('10:00','11:00','CN','Lab 1',''), ('11:00','12:00','EVS','R201',''), ('12:00','13:00','SC','R203',''), ('14:00','15:00','AI','R201',''), ('15:00','16:00','GT','R202','')],
+                'Fri': [('09:00','10:00','SC','R203',''), ('10:00','11:00','GT','R202',''), ('11:00','12:00','CN','Lab 1',''), ('12:00','13:00','AI','R201',''), ('14:00','15:00','CN','Lab 1',''), ('15:00','16:00','EVS','R201','')],
+            }
+            for day, slots in timetable.items():
+                for start, end, subject, room, faculty in slots:
+                    sh, sm = map(int, start.split(':'))
+                    eh, em = map(int, end.split(':'))
+                    TimetableEntry.objects.create(
+                        student=student, day=day,
+                        start_time=time(sh, sm), end_time=time(eh, em),
+                        subject=subject, room=room, faculty=faculty,
+                    )
+
         subject_names = [s for s, _, _ in attendance_data]
-        self.stdout.write(self.style.SUCCESS(f'Seeded demo attendance ({", ".join(subject_names)}) with varied values and fee data for {students.count()} registered student(s)'))
+        self.stdout.write(self.style.SUCCESS(f'Seeded demo attendance ({", ".join(subject_names)}) with varied values, fees, and timetable for {students.count()} registered student(s)'))
 
         # Gate synthetic enrollment behind settings.DEBUG or explicit --demo flag
         allow_demo_enrollment = getattr(settings, 'DEBUG', False) or options.get('demo')

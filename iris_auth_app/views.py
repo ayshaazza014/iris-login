@@ -771,13 +771,45 @@ def student_fees(request):
 def student_timetable(request):
     if request.user.is_staff or request.user.is_superuser:
         raise PermissionDenied
-    entries = request.user.timetable_entries.all()
-    days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-    timetable_by_day = {day: [] for day in days}
-    for entry in entries:
-        if entry.day in timetable_by_day:
-            timetable_by_day[entry.day].append(entry)
-    return render(request, 'iris_auth_app/student_timetable.html', {'timetable_by_day': timetable_by_day})
+    entries = list(request.user.timetable_entries.all())
+    days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
+    day_labels = {'Mon': 'Monday', 'Tue': 'Tuesday', 'Wed': 'Wednesday', 'Thu': 'Thursday', 'Fri': 'Friday'}
+    periods = [
+        ('09:00', '10:00', 'Period 1'),
+        ('10:00', '11:00', 'Period 2'),
+        ('11:00', '12:00', 'Period 3'),
+        ('12:00', '13:00', 'Period 4'),
+        ('13:00', '14:00', 'Lunch'),
+        ('14:00', '15:00', 'Period 5'),
+        ('15:00', '16:00', 'Period 6'),
+    ]
+
+    def fmt(t):
+        return t.strftime('%H:%M')
+
+    grid = []
+    for start, end, label in periods:
+        is_lunch = label == 'Lunch'
+        cells = []
+        for day in days:
+            entry = None
+            if not is_lunch:
+                for e in entries:
+                    if e.day == day and fmt(e.start_time) == start and fmt(e.end_time) == end:
+                        entry = e
+                        break
+            cells.append({'day': day, 'entry': entry})
+        grid.append({
+            'time': f'{start} - {end}',
+            'label': label,
+            'is_lunch': is_lunch,
+            'cells': cells,
+        })
+
+    return render(request, 'iris_auth_app/student_timetable.html', {
+        'day_headers': [(d, day_labels[d]) for d in days],
+        'grid': grid,
+    })
 
 
 @login_required(login_url='login')
