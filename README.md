@@ -87,7 +87,8 @@ The command executes statistical comparisons across multi-session subject cohort
 - **Mean Genuine Distance:** `0.1171 ± 0.0360` (lower variance than iris-only)
 - **Mean Impostor Distance:** `0.4561 ± 0.0271`
 - **Zero-FAR Threshold:** `0.35` (increased from 0.32 in baseline iris-only)
-- **1:N Match Threshold (`0.32`):** FAR: 0.00% | FRR: 0.00%
+- **1:N Match Threshold (`0.35`):** FAR: 0.00% | FRR: 0.00%
+- **Adaptive Multimodal Fusion:** Dynamically weights illumination-invariant periocular biometric features upon high-confidence agreement ($d_{\text{face}} \le 0.35$) to ensure robust authentication on heavily pigmented irises under visible-light ambient illumination.
 - **1:1 Verify Threshold (`0.35`):** FAR: **0.00%** (improved from 0.38% in baseline iris-only) | FRR: 0.00%
 - **Feature Extraction Latency:** ~100 ms / frame (compliant with NFR-08)
 - **Pairwise Comparison Latency:** ~7.0 ms / comparison
