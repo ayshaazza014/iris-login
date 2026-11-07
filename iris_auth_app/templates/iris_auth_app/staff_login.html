@@ -60,6 +60,32 @@
             <a href="{% url 'home' %}" class="text-link">Back to welcome page</a>
         </div>
     </form>
+    <div id="detectionFeedbackCard" class="feedback-card" style="margin-top: 1.5rem; border: 1px dashed #cbd5e1; padding: 1rem; border-radius: 0.75rem; background: #f8fafc;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.4rem;">
+            <span style="font-weight: 600; font-size: 0.85rem; color: #334155;">
+                🧪 <strong>Scan Feedback & Ground-Truth Calibration</strong>
+            </span>
+            <span id="feedbackLastCaptureBadge" style="font-size: 0.75rem; padding: 0.2rem 0.5rem; background: #e2e8f0; border-radius: 9999px; color: #475569;">
+                Ready for scan
+            </span>
+        </div>
+        <p style="font-size: 0.8rem; color: #64748b; margin-bottom: 0.65rem;">
+            Was the detection wrong or matched someone else? Select who was actually in front of the camera to flag and save this frame:
+        </p>
+        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+            <select id="supposedUserSelect" class="form-control" style="flex: 1; min-width: 160px; padding: 0.45rem 0.65rem; font-size: 0.85rem; border-radius: 0.5rem; border: 1px solid #cbd5e1; background: #fff;">
+                <option value="">-- Who was it supposed to be? --</option>
+                {% for u in enrolled_users %}
+                    <option value="{{ u }}">{{ u }}</option>
+                {% endfor %}
+            </select>
+            <button id="flagWrongBtn" type="button" class="btn" style="padding: 0.45rem 0.95rem; font-size: 0.85rem; font-weight: 600; background: #f59e0b; color: white; border: none; border-radius: 0.5rem; cursor: pointer; transition: background 0.2s;">
+                ⚠️ Flag Wrong Match
+            </button>
+        </div>
+        <div id="feedbackFeedbackStatus" style="font-size: 0.8rem; margin-top: 0.6rem; display: none; padding: 0.45rem 0.75rem; border-radius: 0.375rem;"></div>
+    </div>
+
 </div>
 <script src="{% static 'iris_auth_app/camera.js' %}?v={% now 'U' %}"></script>
 {% endblock %}

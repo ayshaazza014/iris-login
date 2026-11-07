@@ -29,6 +29,7 @@ staticfiles/
 *.tif
 *.tiff
 tmp_iris_debug/
+debug_captures/
 validation_out/
 
 # Keep only the clearly synthetic image required by the test suite

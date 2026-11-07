@@ -1202,3 +1202,24 @@ class FacialFeaturesAndMultimodalTests(TestCase):
         self.assertTrue(res_sample['iris_detected'])
         self.assertGreaterEqual(len(res_sample['irises']), 1)
 
+
+    def test_report_detection_feedback_records_ground_truth(self):
+        response = self.client.post(
+            '/api/detection-feedback/',
+            {'supposed_user': 'ree', 'last_matched': 'fizan', 'notes': 'Test feedback'},
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data.get('status'), 'ok')
+        self.assertIn('ree', data.get('message', ''))
+
+    def test_report_detection_feedback_requires_supposed_user(self):
+        response = self.client.post(
+            '/api/detection-feedback/',
+            {'supposed_user': ''},
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+        )
+        self.assertEqual(response.status_code, 400)
+        data = response.json()
+        self.assertEqual(data.get('status'), 'error')

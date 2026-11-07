@@ -18,4 +18,5 @@ urlpatterns = [
     path('assessments/', views.student_assessments, name='student_assessments'),
     path('internal-marks/', views.student_internal_marks, name='student_internal_marks'),
     path('logout/', views.logout_view, name='logout'),
+    path('api/detection-feedback/', views.report_detection_feedback, name='detection_feedback'),
 ]

@@ -13,7 +13,30 @@
         <span class="status-pill"><span class="status-dot"></span> Identity verified</span>
     </div>
 
-    <div class="dashboard-layout">
+    
+    <!-- Wrong Person / Feedback Debug Banner -->
+    <div id="mismatchBanner" style="margin-bottom: 1.25rem; padding: 0.75rem 1.25rem; background: #fffbeb; border: 1px solid #fef3c7; border-left: 4px solid #f59e0b; border-radius: 0.5rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;">
+        <div style="font-size: 0.85rem; color: #92400e;">
+            <strong>⚠️ Not {{ user.display_name|default:user.username }}?</strong> If the camera misidentified you, flag who it was supposed to be:
+        </div>
+        <form method="post" action="{% url 'detection_feedback' %}" style="display: flex; gap: 0.5rem; align-items: center; margin: 0; flex-wrap: wrap;">
+            {% csrf_token %}
+            <input type="hidden" name="last_matched" value="{{ user.username }}">
+            <input type="hidden" name="redirect_logout" value="true">
+            <select name="supposed_user" class="form-control" required style="padding: 0.35rem 0.65rem; font-size: 0.85rem; border-radius: 0.375rem; border: 1px solid #cbd5e1; background: #fff;">
+                <option value="">-- Who was it supposed to be? --</option>
+                {% for u in enrolled_users %}
+                    {% if u != user.username %}
+                        <option value="{{ u }}">{{ u }}</option>
+                    {% endif %}
+                {% endfor %}
+            </select>
+            <button type="submit" class="btn" style="padding: 0.4rem 0.85rem; font-size: 0.85rem; font-weight: 600; background: #dc2626; color: white; border: none; border-radius: 0.375rem; cursor: pointer;">
+                Flag Wrong Match &amp; Log Out
+            </button>
+        </form>
+    </div>
+<div class="dashboard-layout">
         <aside class="profile-card">
             <div class="profile-monogram" aria-hidden="true">{{ user.display_name|default:user.username|first|upper }}</div>
             <span class="section-eyebrow">PROFILE</span>

@@ -535,3 +535,78 @@ window.addEventListener('pageshow', () => {
   if (scannerFrameText) scannerFrameText.style.display = 'none';
   setStatus('Choose an iris image below, or optionally use the camera.', 'idle');
 });
+
+
+// --------------------------------------------------------------------------
+// Temporary Detection Feedback & Ground-Truth Calibration Handler
+// --------------------------------------------------------------------------
+(function setupDetectionFeedback() {
+  const flagWrongBtn = document.getElementById('flagWrongBtn');
+  const supposedUserSelect = document.getElementById('supposedUserSelect');
+  const feedbackStatus = document.getElementById('feedbackFeedbackStatus');
+  const feedbackLastCaptureBadge = document.getElementById('feedbackLastCaptureBadge');
+
+  if (!flagWrongBtn || !supposedUserSelect) return;
+
+  flagWrongBtn.addEventListener('click', async () => {
+    const supposedUser = supposedUserSelect.value.trim();
+    if (!supposedUser) {
+      if (feedbackStatus) {
+        feedbackStatus.style.display = 'block';
+        feedbackStatus.style.background = '#fee2e2';
+        feedbackStatus.style.color = '#b91c1c';
+        feedbackStatus.textContent = 'Please select who the person was supposed to be.';
+      }
+      return;
+    }
+
+    flagWrongBtn.disabled = true;
+    flagWrongBtn.textContent = 'Saving note...';
+
+    try {
+      const formData = new FormData();
+      formData.append('supposed_user', supposedUser);
+      formData.append('last_matched', window.lastMatchedUser || '');
+      const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
+      formData.append('csrfmiddlewaretoken', csrfToken);
+
+      const resp = await fetch('/api/detection-feedback/', {
+        method: 'POST',
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          'Accept': 'application/json',
+        },
+        body: formData,
+      });
+
+      const data = await resp.json();
+      if (feedbackStatus) {
+        feedbackStatus.style.display = 'block';
+        if (resp.ok && data.status === 'ok') {
+          feedbackStatus.style.background = '#dcfce7';
+          feedbackStatus.style.color = '#15803d';
+          feedbackStatus.textContent = data.message;
+          if (feedbackLastCaptureBadge) {
+            feedbackLastCaptureBadge.textContent = 'Flagged: ' + supposedUser;
+            feedbackLastCaptureBadge.style.background = '#fef3c7';
+            feedbackLastCaptureBadge.style.color = '#92400e';
+          }
+        } else {
+          feedbackStatus.style.background = '#fee2e2';
+          feedbackStatus.style.color = '#b91c1c';
+          feedbackStatus.textContent = data.message || 'Error recording feedback';
+        }
+      }
+    } catch (err) {
+      if (feedbackStatus) {
+        feedbackStatus.style.display = 'block';
+        feedbackStatus.style.background = '#fee2e2';
+        feedbackStatus.style.color = '#b91c1c';
+        feedbackStatus.textContent = 'Network error while recording feedback.';
+      }
+    } finally {
+      flagWrongBtn.disabled = false;
+      flagWrongBtn.textContent = '⚠️ Flag Wrong Match';
+    }
+  });
+})();

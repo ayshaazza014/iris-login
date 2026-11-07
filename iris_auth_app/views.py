@@ -1,4 +1,6 @@
 import collections
+from datetime import datetime
+import json
 import logging
 import os
 import struct
@@ -21,6 +23,7 @@ from .models import IrisTemplate, IrisUser
 from .services import (
     TEMPLATE_ENCODING_VERSION,
     detect_face_and_iris,
+    compare_facial_features,
     ensure_iris_template_for_user,
     extract_facial_features,
     extract_secondary_template_from_image,
@@ -318,6 +321,18 @@ def register_view(request):
                         facial_features_array=facial_features,
                     )
 
+                try:
+                    from iris_auth_app.debug_logger import log_debug_capture
+                    log_debug_capture(
+                        image_array=image,
+                        action='register',
+                        status='enrolled',
+                        identifier=username,
+                        matched_user=username,
+                    )
+                except Exception as log_exc:
+                    logger.warning("Debug logging failed: %s", log_exc)
+
                 messages.success(request, f'Enrollment successful for {user.display_name}. You can now log in using your iris.')
                 return redirect('login')
             except ValidationError as exc:
@@ -502,7 +517,8 @@ def staff_login_view(request):
             messages.error(request, 'An unexpected error occurred while processing the iris image.')
             return render(request, 'iris_auth_app/staff_login.html')
 
-    return render(request, 'iris_auth_app/staff_login.html')
+    enrolled_users = list(IrisUser.objects.filter(is_active=True).values_list('username', flat=True))
+    return render(request, 'iris_auth_app/staff_login.html', {'enrolled_users': enrolled_users})
 
 
 @login_required(login_url='staff_login')
@@ -556,6 +572,17 @@ def staff_register_view(request):
                     secondary_mask_array=sec_mask,
                     facial_features_array=facial_features,
                 )
+                try:
+                    from iris_auth_app.debug_logger import log_debug_capture
+                    log_debug_capture(
+                        image_array=image,
+                        action='staff_register',
+                        status='enrolled',
+                        identifier=username,
+                        matched_user=username,
+                    )
+                except Exception as log_exc:
+                    logger.warning("Debug logging failed: %s", log_exc)
         except ValidationError as exc:
             messages.error(request, str(exc))
             return render(request, 'iris_auth_app/staff_register.html')
@@ -718,6 +745,17 @@ def login_view(request):
 
         except ValidationError as exc:
             logger.warning("[LOGIN_EXC] %s", exc)
+            try:
+                from iris_auth_app.debug_logger import log_debug_capture
+                if 'image' in locals() and image is not None:
+                    log_debug_capture(
+                        image_array=image,
+                        action='login',
+                        status='error',
+                        error=str(exc),
+                    )
+            except Exception:
+                pass
             if is_ajax:
                 return JsonResponse({'status': 'retry', 'message': str(exc)})
             messages.error(request, str(exc))
@@ -729,7 +767,8 @@ def login_view(request):
             messages.error(request, 'An unexpected error occurred while processing the iris image.')
             return render(request, 'iris_auth_app/login.html')
 
-    return render(request, 'iris_auth_app/login.html')
+    enrolled_users = list(IrisUser.objects.filter(is_active=True).values_list('username', flat=True))
+    return render(request, 'iris_auth_app/login.html', {'enrolled_users': enrolled_users})
 
 
 @require_http_methods(["POST"])
@@ -758,14 +797,16 @@ def _iris_login_failure_message(reason, *, staff_only):
 def dashboard(request):
     if request.user.is_staff or request.user.is_superuser:
         raise PermissionDenied
-    return render(request, 'iris_auth_app/dashboard.html', {'user': request.user})
+    enrolled_users = list(IrisUser.objects.filter(is_active=True).values_list('username', flat=True))
+    return render(request, 'iris_auth_app/dashboard.html', {'user': request.user, 'enrolled_users': enrolled_users})
 
 
 @login_required(login_url='staff_login')
 def staff_dashboard(request):
     if not request.user.is_staff:
         raise PermissionDenied
-    return render(request, 'iris_auth_app/staff_dashboard.html', {'user': request.user})
+    enrolled_users = list(IrisUser.objects.filter(is_active=True).values_list('username', flat=True))
+    return render(request, 'iris_auth_app/staff_dashboard.html', {'user': request.user, 'enrolled_users': enrolled_users})
 
 
 @require_http_methods(["POST"])
@@ -829,3 +870,95 @@ def student_internal_marks(request):
         raise PermissionDenied
     marks = request.user.internal_marks.all()
     return render(request, 'iris_auth_app/student_internal_marks.html', {'marks': marks})
+
+
+@require_http_methods(["POST"])
+def report_detection_feedback(request):
+    """
+    Temporary debug & calibration feature:
+    Records ground-truth notes when a detection/login was wrong or misidentified.
+    Saves a labeled copy into debug_captures/labeled_samples/ and logs diagnostic distances.
+    """
+    try:
+        supposed_user = request.POST.get('supposed_user', '').strip()
+        last_matched = request.POST.get('last_matched', '').strip()
+        notes = request.POST.get('notes', '').strip()
+        redirect_logout = request.POST.get('redirect_logout') == 'true'
+
+        if not supposed_user:
+            if redirect_logout:
+                messages.error(request, 'Please select who the person was supposed to be.')
+                return redirect('dashboard')
+            return JsonResponse({'status': 'error', 'message': 'Please select who the person was supposed to be.'}, status=400)
+
+        debug_dir = getattr(settings, 'IRIS_DEBUG_DIR', os.path.join(settings.BASE_DIR, 'debug_captures'))
+        import glob
+        import shutil
+
+        raw_captures = sorted(glob.glob(os.path.join(debug_dir, '*_raw.jpg')), key=os.path.getmtime, reverse=True)
+        latest_raw = raw_captures[0] if raw_captures else None
+
+        labeled_dir = os.path.join(debug_dir, 'labeled_samples')
+        os.makedirs(labeled_dir, exist_ok=True)
+
+        labeled_copy = None
+        if latest_raw:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            dst_name = f"{supposed_user}_{timestamp}_flagged_from_{last_matched or 'unknown'}.jpg"
+            dst_path = os.path.join(labeled_dir, dst_name)
+            shutil.copy2(latest_raw, dst_path)
+            labeled_copy = dst_name
+
+        distance_info = {}
+        target_user = IrisUser.objects.filter(username__iexact=supposed_user).first()
+        if target_user and latest_raw:
+            t = IrisTemplate.objects.filter(user=target_user).first()
+            if t:
+                import cv2
+                img = cv2.imread(latest_raw)
+                c_feat = extract_facial_features(img)
+                s_feat = t.get_facial_features()
+                if c_feat is not None and s_feat is not None:
+                    d_face = compare_facial_features(s_feat, c_feat)
+                    if d_face is not None:
+                        distance_info['face_distance'] = round(float(d_face), 4)
+
+        feedback_entry = {
+            'timestamp': datetime.now().isoformat(),
+            'supposed_user': supposed_user,
+            'last_matched': last_matched or None,
+            'latest_raw_capture': os.path.basename(latest_raw) if latest_raw else None,
+            'labeled_sample': labeled_copy,
+            'diagnosis': distance_info,
+            'notes': notes,
+        }
+
+        feedback_log = os.path.join(debug_dir, 'feedback_log.jsonl')
+        with open(feedback_log, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(feedback_entry, default=str) + '\n')
+
+        logger.warning(
+            "[DETECTION_FEEDBACK] Ground-truth reported: supposed='%s', was_matched='%s', raw='%s', dist=%s",
+            supposed_user, last_matched, os.path.basename(latest_raw) if latest_raw else None, distance_info
+        )
+
+        msg = f"✓ Logged! Frame saved as ground-truth for '{supposed_user}'."
+        if 'face_distance' in distance_info:
+            msg += f" (Face distance to {supposed_user}'s enrolled template: {distance_info['face_distance']})"
+
+        if redirect_logout:
+            logout(request)
+            messages.warning(request, f"Mismatch flagged: previous login was noted as '{supposed_user}'. Please re-scan.")
+            return redirect('login')
+
+        return JsonResponse({
+            'status': 'ok',
+            'message': msg,
+            'feedback': feedback_entry,
+        })
+    except Exception as exc:
+        logger.exception("Error recording detection feedback")
+        if request.POST.get('redirect_logout') == 'true':
+            messages.error(request, 'Failed to log feedback: ' + str(exc))
+            return redirect('dashboard')
+        return JsonResponse({'status': 'error', 'message': str(exc)}, status=500)

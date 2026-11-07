@@ -102,7 +102,7 @@ def ensure_iris_template_for_user(
     return template
 
 
-def compare_templates(code_a, mask_a, code_b, mask_b, max_shift=20, *, feat_a=None, feat_b=None):
+def compare_templates_detailed(code_a, mask_a, code_b, mask_b, max_shift=20, *, feat_a=None, feat_b=None):
     module = load_iris_module()
     if code_a is None or mask_a is None or code_b is None or mask_b is None:
         raise ValidationError('All template arrays are required for comparison.')
@@ -115,23 +115,39 @@ def compare_templates(code_a, mask_a, code_b, mask_b, max_shift=20, *, feat_a=No
     if code_a.shape != code_b.shape or code_a.shape != mask_a.shape or code_b.shape != mask_b.shape:
         raise ValidationError('Template shapes must match for comparison.')
 
-    iris_dist = module.hamming(code_a, mask_a, code_b, mask_b, max_shift=max_shift)
+    iris_dist = float(module.hamming(code_a, mask_a, code_b, mask_b, max_shift=max_shift))
+    face_dist = None
+    weight = 0.0
+    fused_dist = iris_dist
 
     # Multi-feature biometric fusion (iris + facial / periocular features)
     if feat_a is not None and feat_b is not None and hasattr(module, 'compare_facial_features'):
         try:
-            face_dist = module.compare_facial_features(feat_a, feat_b)
-            if face_dist is not None and math.isfinite(face_dist):
+            fd = module.compare_facial_features(feat_a, feat_b)
+            if fd is not None and math.isfinite(fd):
+                face_dist = float(fd)
                 default_weight = float(os.environ.get('IRIS_FACIAL_FEATURE_WEIGHT', '0.20'))
                 if face_dist <= 0.35:
                     weight = max(default_weight, 0.85)
                 else:
                     weight = default_weight
-                return float((1.0 - weight) * iris_dist + weight * face_dist)
+                fused_dist = float((1.0 - weight) * iris_dist + weight * face_dist)
         except Exception:
             pass
 
-    return iris_dist
+    return {
+        'iris_distance': iris_dist,
+        'face_distance': face_dist,
+        'fused_distance': fused_dist,
+        'weight': weight,
+    }
+
+
+def compare_templates(code_a, mask_a, code_b, mask_b, max_shift=20, *, feat_a=None, feat_b=None):
+    details = compare_templates_detailed(
+        code_a, mask_a, code_b, mask_b, max_shift=max_shift, feat_a=feat_a, feat_b=feat_b
+    )
+    return details['fused_distance']
 
 
 def compare_facial_features(feat_a, feat_b):
@@ -314,6 +330,8 @@ def verify_iris_for_user(identifier, image_array, *, threshold=VERIFICATION_THRE
     if user is None:
         return None
 
+    best_comp = None
+    best_distance = 1.0
     try:
         template = IrisTemplate.objects.filter(user=user).first()
         if template is None:
@@ -334,7 +352,7 @@ def verify_iris_for_user(identifier, image_array, *, threshold=VERIFICATION_THRE
                     feat_b=captured_facial,
                 )
                 if math.isfinite(float(d)):
-                    distances.append(d)
+                    distances.append(float(d))
         if not distances:
             return None
         best_distance = min(distances)
@@ -342,7 +360,36 @@ def verify_iris_for_user(identifier, image_array, *, threshold=VERIFICATION_THRE
         return None
 
     logger.warning('[VERIFY_EVAL] user=%s best_distance=%.4f (threshold=%.2f)', user.username, best_distance, threshold)
-    if math.isfinite(float(best_distance)) and best_distance <= threshold:
+    matched = bool(math.isfinite(float(best_distance)) and best_distance <= threshold)
+
+    try:
+        from iris_auth_app.debug_logger import log_debug_capture
+        face_d = None
+        if stored_facial is not None and captured_facial is not None:
+            try:
+                face_d = compare_facial_features(stored_facial, captured_facial)
+            except Exception:
+                pass
+        comp_records = [{
+            'username': user.username,
+            'face_distance': round(float(face_d), 4) if face_d is not None else None,
+            'fused_distance': round(float(best_distance), 4),
+            'threshold': threshold,
+            'matched': matched,
+        }]
+        log_debug_capture(
+            image_array=image_array,
+            action='verify',
+            status='matched' if matched else 'verify_failed',
+            identifier=identifier,
+            matched_user=user.username if matched else None,
+            failure_reason=None if matched else 'threshold_exceeded',
+            comparisons=comp_records,
+        )
+    except Exception as exc:
+        logger.warning('Debug capture logging failed: %s', exc)
+
+    if matched:
         return user
     return None
 
@@ -365,6 +412,7 @@ def identify_user_from_iris_result(image_array, *, threshold=MATCH_THRESHOLD, st
         return None, 'no_templates'
 
     matches = []
+    all_comparison_records = []
     for template in templates:
         try:
             stored_templates = template.get_all_templates()
@@ -381,10 +429,24 @@ def identify_user_from_iris_result(image_array, *, threshold=MATCH_THRESHOLD, st
                         feat_b=captured_facial,
                     )
                     if math.isfinite(float(d)):
-                        distances.append(d)
+                        distances.append(float(d))
             if not distances:
                 continue
             best_distance = min(distances)
+            is_match = bool(math.isfinite(float(best_distance)) and best_distance <= threshold)
+            face_d = None
+            if stored_facial is not None and captured_facial is not None:
+                try:
+                    face_d = compare_facial_features(stored_facial, captured_facial)
+                except Exception:
+                    pass
+            all_comparison_records.append({
+                'username': template.user.username,
+                'face_distance': round(float(face_d), 4) if face_d is not None else None,
+                'fused_distance': round(float(best_distance), 4),
+                'threshold': threshold,
+                'matched': is_match,
+            })
         except (ValidationError, ValueError, TypeError, AttributeError):
             logger.warning(
                 'Skipping invalid active iris template id=%s during authentication.',
@@ -394,18 +456,37 @@ def identify_user_from_iris_result(image_array, *, threshold=MATCH_THRESHOLD, st
             continue
 
         logger.warning('[SCAN_EVAL] compared with user=%s best_d=%.4f (threshold=%.2f)', template.user.username, best_distance, threshold)
-        if math.isfinite(float(best_distance)) and best_distance <= threshold:
+        if is_match:
             matches.append((best_distance, template.user))
 
+    final_user = None
+    final_reason = None
     if not matches:
-        return None, 'no_match'
-    if len(matches) > 1:
+        final_reason = 'no_match'
+    elif len(matches) > 1:
         matches.sort(key=lambda m: m[0])
         # If two matches have virtually identical distance (e.g. mock test collisions), reject as ambiguous
         if matches[0][0] >= matches[1][0] - 0.01:
-            return None, 'ambiguous'
-        return matches[0][1], None
-    return matches[0][1], None
+            final_reason = 'ambiguous'
+        else:
+            final_user = matches[0][1]
+    else:
+        final_user = matches[0][1]
+
+    try:
+        from iris_auth_app.debug_logger import log_debug_capture
+        log_debug_capture(
+            image_array=image_array,
+            action='staff_login' if staff_only else 'login',
+            status='matched' if final_user else (final_reason or 'failed'),
+            matched_user=final_user.username if final_user else None,
+            failure_reason=final_reason,
+            comparisons=all_comparison_records,
+        )
+    except Exception as exc:
+        logger.warning('Debug capture logging failed: %s', exc)
+
+    return final_user, final_reason
 
 
 def identify_user_from_iris(image_array, *, threshold=MATCH_THRESHOLD, staff_only=False):

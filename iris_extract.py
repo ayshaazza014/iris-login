@@ -399,39 +399,146 @@ def extract_facial_features(image_bgr_or_gray, eyes=None):
     else:
         tex_vec = np.zeros(256, dtype=np.float32)
 
-    full_vector = np.concatenate([np.array(geo_features, dtype=np.float32), tex_vec])
+    # Dense multi-zone Macro Face Structure descriptor (177 elements)
+    # Extracts multi-zone anatomical structures: forehead/brow, left/right eye orbits,
+    # nasal bridge, cheekbones, and lower facial contours.
+    if face_box is not None:
+        fx, fy, fw, fh = face_box
+    elif len(eyes) >= 2:
+        e1, e2 = eyes[0], eyes[1]
+        min_x = min(e1[0], e2[0])
+        max_x = max(e1[0] + e1[2], e2[0] + e2[2])
+        span = max_x - min_x
+        fx = max(0, int(min_x - 0.25 * span))
+        fw = min(w - fx, int(span * 1.5))
+        fy = max(0, int(min(e1[1], e2[1]) - 0.5 * e1[3]))
+        fh = min(h - fy, int(fw * 1.2))
+    else:
+        e = eyes[0]
+        fx = max(0, int(e[0] - 0.75 * e[2]))
+        fw = min(w - fx, int(2.5 * e[2]))
+        fy = max(0, int(e[1] - 0.5 * e[3]))
+        fh = min(h - fy, int(2.5 * e[3]))
+
+    face_crop = gray[fy:fy + fh, fx:fx + fw]
+    if face_crop.size > 0:
+        face_norm = cv2.resize(face_crop, (96, 96), interpolation=cv2.INTER_AREA)
+        clahe_face = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(6, 6))
+        face_enh = clahe_face.apply(face_norm)
+
+        # 6 anatomical structural zones:
+        zones = [
+            face_enh[0:24, :],       # Brow / Forehead band
+            face_enh[24:54, 0:48],   # Left eye / orbital contour
+            face_enh[24:54, 48:96],  # Right eye / orbital contour
+            face_enh[35:70, 30:66],  # Nasal bridge & root
+            face_enh[54:80, :],      # Mid-face & zygomatic arches
+            face_enh[80:96, :],      # Lower face & chin
+        ]
+        zone_descriptors = []
+        for z in zones:
+            zgx = cv2.Sobel(z, cv2.CV_32F, 1, 0, ksize=3)
+            zgy = cv2.Sobel(z, cv2.CV_32F, 0, 1, ksize=3)
+            zmag, zang = cv2.cartToPolar(zgx, zgy, angleInDegrees=True)
+            zb_idx = (zang / 45.0).astype(np.int32) % 8
+            zhist = np.zeros(8, dtype=np.float32)
+            for b in range(8):
+                zhist[b] = np.sum(zmag[zb_idx == b])
+            znorm = np.linalg.norm(zhist)
+            if znorm > 1e-6:
+                zhist /= znorm
+            zone_descriptors.append(zhist)
+
+        # 4x4 spatial grid gradient descriptors across full face
+        grid_descriptors = []
+        for r in range(4):
+            for c in range(4):
+                cell = face_enh[r * 24:(r + 1) * 24, c * 24:(c + 1) * 24]
+                cgx = cv2.Sobel(cell, cv2.CV_32F, 1, 0, ksize=3)
+                cgy = cv2.Sobel(cell, cv2.CV_32F, 0, 1, ksize=3)
+                cmag, cang = cv2.cartToPolar(cgx, cgy, angleInDegrees=True)
+                cb_idx = (cang / 45.0).astype(np.int32) % 8
+                chist = np.zeros(8, dtype=np.float32)
+                for b in range(8):
+                    chist[b] = np.sum(cmag[cb_idx == b])
+                cnorm = np.linalg.norm(chist)
+                if cnorm > 1e-6:
+                    chist /= cnorm
+                grid_descriptors.append(chist)
+
+        aspect_feat = np.array([float(fw) / max(1.0, float(fh))], dtype=np.float32)
+        struct_vec = np.concatenate([aspect_feat] + zone_descriptors + grid_descriptors)
+    else:
+        struct_vec = np.zeros(177, dtype=np.float32)
+
+    full_vector = np.concatenate([np.array(geo_features, dtype=np.float32), tex_vec, struct_vec])
     return full_vector.astype(np.float32)
 
 
 def compare_facial_features(feat_a, feat_b):
     """
     Compute normalized biometric distance between two facial/periocular feature vectors.
+    Supports both legacy (259-D) and enhanced dense face structure (436-D) templates.
     Returns float in [0.0, 1.0].
     """
     if feat_a is None or feat_b is None:
         return None
     fa = np.asarray(feat_a, dtype=np.float32).flatten()
     fb = np.asarray(feat_b, dtype=np.float32).flatten()
-    if fa.shape != fb.shape or fa.size < 4:
+    if fa.size < 4 or fb.size < 4:
         return None
 
-    geo_a, tex_a = fa[:3], fa[3:]
-    geo_b, tex_b = fb[:3], fb[3:]
+    geo_a, tex_a = fa[:3], fa[3:259]
+    geo_b, tex_b = fb[:3], fb[3:259]
 
     # Periocular texture cosine distance
     norm_a = np.linalg.norm(tex_a)
     norm_b = np.linalg.norm(tex_b)
     if norm_a > 1e-6 and norm_b > 1e-6:
         cos_sim = float(np.dot(tex_a, tex_b) / (norm_a * norm_b))
-        d_tex = max(0.0, min(1.0, (1.0 - cos_sim) / 2.0 * 2.0))
+        d_tex = max(0.0, min(1.0, (1.0 - cos_sim)))
     else:
         d_tex = 0.5
 
-    # Geometric ratios distance
-    d_geo = float(np.linalg.norm(geo_a - geo_b))
-    d_geo = min(1.0, d_geo * 2.0)
+    # Geometric ratios distance (only valid when BOTH captures detected 2 eyes)
+    has_two_eyes_a = geo_a[0] > 0.05
+    has_two_eyes_b = geo_b[0] > 0.05
 
-    fused_dist = 0.80 * d_tex + 0.20 * d_geo
+    d_geo = None
+    if has_two_eyes_a and has_two_eyes_b:
+        d_geo_val = float(np.linalg.norm(geo_a - geo_b))
+        d_geo = min(1.0, d_geo_val * 1.5)
+
+    # Dense Macro Face Structure distance (when available in both vectors)
+    d_struct = None
+    if fa.size >= 436 and fb.size >= 436:
+        struct_a = fa[259:436]
+        struct_b = fb[259:436]
+        aspect_diff = abs(float(struct_a[0]) - float(struct_b[0]))
+        desc_a = struct_a[1:]
+        desc_b = struct_b[1:]
+        sn_a = np.linalg.norm(desc_a)
+        sn_b = np.linalg.norm(desc_b)
+        if sn_a > 1e-6 and sn_b > 1e-6:
+            s_cos = float(np.dot(desc_a, desc_b) / (sn_a * sn_b))
+            d_struct_cos = max(0.0, min(1.0, 1.0 - s_cos))
+        else:
+            d_struct_cos = 0.5
+        raw_struct = float(0.85 * d_struct_cos + 0.15 * min(1.0, aspect_diff * 2.0))
+        d_struct = min(1.0, raw_struct * 3.0)
+
+    # Composite multi-level fusion:
+    if d_struct is not None:
+        if d_geo is not None:
+            fused_dist = 0.50 * d_struct + 0.35 * d_tex + 0.15 * d_geo
+        else:
+            fused_dist = 0.60 * d_struct + 0.40 * d_tex
+    else:
+        if d_geo is not None:
+            fused_dist = 0.75 * d_tex + 0.25 * d_geo
+        else:
+            fused_dist = d_tex
+
     return float(max(0.0, min(1.0, fused_dist)))
 
 
