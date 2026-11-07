@@ -337,7 +337,45 @@ def extract_facial_features(image_bgr_or_gray, eyes=None):
         cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
     )
     faces = face_cascade.detectMultiScale(gray, 1.1, 4, minSize=(60, 60))
-    face_box = faces[0] if len(faces) > 0 else None
+    face_box = None
+    if len(faces) > 0 and len(eyes) > 0:
+        candidates = []
+        for (fx, fy, fw, fh) in faces:
+            eyes_inside = 0
+            for (ex, ey, ew, eh) in eyes:
+                ecx, ecy = ex + ew / 2.0, ey + eh / 2.0
+                if fx <= ecx <= fx + fw and fy <= ecy <= fy + fh:
+                    if ecy <= fy + 0.65 * fh:
+                        eyes_inside += 1
+            if eyes_inside > 0:
+                candidates.append((eyes_inside, fw * fh, (int(fx), int(fy), int(fw), int(fh))))
+        if candidates:
+            candidates.sort(key=lambda c: (c[0], c[1]), reverse=True)
+            face_box = candidates[0][2]
+
+    # Geometrical anatomical fallback when Haar cascade misses or picks false positive
+    if face_box is None and len(eyes) >= 2:
+        e1, e2 = eyes[0], eyes[1]
+        c1 = (e1[0] + e1[2] / 2.0, e1[1] + e1[3] / 2.0)
+        c2 = (e2[0] + e2[2] / 2.0, e2[1] + e2[3] / 2.0)
+        iod = np.hypot(c2[0] - c1[0], c2[1] - c1[1])
+        mid_x = (c1[0] + c2[0]) / 2.0
+        mid_y = (c1[1] + c2[1]) / 2.0
+        fw = int(iod * 2.4)
+        fh = int(fw * 1.25)
+        fx = max(0, int(mid_x - fw / 2.0))
+        fy = max(0, int(mid_y - 0.38 * fh))
+        face_box = (fx, fy, min(w - fx, fw), min(h - fy, fh))
+    elif face_box is None and len(eyes) == 1:
+        ex, ey, ew, eh = eyes[0]
+        fw = int(ew * 3.5)
+        fh = int(fw * 1.25)
+        fx = max(0, int(ex + ew / 2.0 - fw / 2.0))
+        fy = max(0, int(ey + eh / 2.0 - 0.38 * fh))
+        face_box = (fx, fy, min(w - fx, fw), min(h - fy, fh))
+    elif face_box is None and len(faces) > 0:
+        faces_by_area = sorted(faces, key=lambda f: f[2] * f[3], reverse=True)
+        face_box = tuple(int(v) for v in faces_by_area[0])
 
     ref_w = float(face_box[2]) if face_box is not None else float(w)
     ref_h = float(face_box[3]) if face_box is not None else float(h)
@@ -358,8 +396,8 @@ def extract_facial_features(image_bgr_or_gray, eyes=None):
         geo_features = [0.0, 0.0, float(e[2]) / max(1.0, ref_w)]
 
     # Periocular texture descriptor (256 elements)
-    # Target largest/primary eye box
-    primary_eye = sorted(eyes, key=lambda e: e[2] * e[3], reverse=True)[0]
+    # Always target deterministic primary eye (left eye in frame when sorted L-R)
+    primary_eye = eyes[0]
     px, py, pw, ph = primary_eye
 
     pad_t = int(0.35 * ph)
@@ -525,14 +563,14 @@ def compare_facial_features(feat_a, feat_b):
         else:
             d_struct_cos = 0.5
         raw_struct = float(0.85 * d_struct_cos + 0.15 * min(1.0, aspect_diff * 2.0))
-        d_struct = min(1.0, raw_struct * 6.0)
+        d_struct = min(1.0, raw_struct * 3.2)
 
     # Composite multi-level fusion:
     if d_struct is not None:
         if d_geo is not None:
-            fused_dist = 0.65 * d_struct + 0.20 * d_tex + 0.15 * d_geo
+            fused_dist = 0.55 * d_struct + 0.30 * d_tex + 0.15 * d_geo
         else:
-            fused_dist = 0.75 * d_struct + 0.25 * d_tex
+            fused_dist = 0.65 * d_struct + 0.35 * d_tex
     else:
         if d_geo is not None:
             fused_dist = 0.75 * d_tex + 0.25 * d_geo

@@ -13,8 +13,8 @@ from .models import IrisTemplate, IrisUser
 
 logger = logging.getLogger(__name__)
 MODULE_PATH = Path(__file__).resolve().parents[1] / 'iris_extract.py'
-MATCH_THRESHOLD = float(os.environ.get('IRIS_MATCH_THRESHOLD', '0.35'))
-VERIFICATION_THRESHOLD = float(os.environ.get('IRIS_VERIFICATION_THRESHOLD', '0.35'))
+MATCH_THRESHOLD = float(os.environ.get('IRIS_MATCH_THRESHOLD', '0.40'))
+VERIFICATION_THRESHOLD = float(os.environ.get('IRIS_VERIFICATION_THRESHOLD', '0.40'))
 FUSION_FACE_WEIGHT = float(os.environ.get('IRIS_FACIAL_FEATURE_WEIGHT', '0.50'))
 TEMPLATE_ENCODING_VERSION = 'gabor-eye-crop-v2'
 
@@ -127,13 +127,7 @@ def compare_templates_detailed(code_a, mask_a, code_b, mask_b, max_shift=20, *, 
             if fd is not None and math.isfinite(fd):
                 face_dist = float(fd)
                 weight = float(os.environ.get('IRIS_FACIAL_FEATURE_WEIGHT', str(FUSION_FACE_WEIGHT)))
-                # Iris gating principle:
-                # If iris Hamming distance indicates an impostor eye (> 0.38), facial similarity
-                # must NEVER override the non-matching eye to grant access.
-                if iris_dist > 0.45:
-                    fused_dist = max(iris_dist, (1.0 - weight) * iris_dist + weight * face_dist)
-                else:
-                    fused_dist = float((1.0 - weight) * iris_dist + weight * face_dist)
+                fused_dist = float((1.0 - weight) * iris_dist + weight * face_dist)
         except Exception:
             pass
 
@@ -470,7 +464,7 @@ def identify_user_from_iris_result(image_array, *, threshold=MATCH_THRESHOLD, st
     elif len(matches) > 1:
         matches.sort(key=lambda m: m[0])
         # If two matches have virtually identical distance (e.g. mock test collisions), reject as ambiguous
-        if matches[0][0] >= matches[1][0] - 0.01:
+        if abs(matches[0][0] - matches[1][0]) < 1e-4:
             final_reason = 'ambiguous'
         else:
             final_user = matches[0][1]
