@@ -287,7 +287,12 @@ function scanCurrentFrame() {
             }
 
             if (scannerBadge) {
-              if (det.face_detected && det.iris_detected) {
+              const eyeBoxes = det.eyes_boxes || [];
+              const maxEyeW = eyeBoxes.length > 0 ? Math.max(...eyeBoxes.map(b => b[2] || 0)) : 0;
+              if (maxEyeW > 0 && maxEyeW < 50) {
+                scannerBadge.textContent = '⚠ Move Closer (Eyes too small)';
+                setStatus('Move closer so your iris fills the camera view.', 'scanning');
+              } else if (det.face_detected && det.iris_detected) {
                 scannerBadge.textContent = '✓ Face & Iris Locked (' + (det.eyes_detected || 1) + ' eye)';
               } else if (det.face_detected) {
                 scannerBadge.textContent = '✓ Face Aligned • Centering Iris';

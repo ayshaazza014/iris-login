@@ -350,9 +350,9 @@ def extract_facial_features(image_bgr_or_gray, eyes=None):
         dy = c2[1] - c1[1]
         interocular_dist = np.hypot(dx, dy)
         interocular_ratio = interocular_dist / max(1.0, ref_w)
-        tilt_angle = np.arctan2(dy, max(1.0, dx))  # tilt in radians
+        eye_to_interocular = ((e1[2] + e2[2]) / 2.0) / max(1.0, interocular_dist)
         avg_eye_ratio = ((e1[2] + e2[2]) / 2.0) / max(1.0, ref_w)
-        geo_features = [interocular_ratio, tilt_angle, avg_eye_ratio]
+        geo_features = [interocular_ratio, eye_to_interocular, avg_eye_ratio]
     else:
         e = eyes[0]
         geo_features = [0.0, 0.0, float(e[2]) / max(1.0, ref_w)]
@@ -525,14 +525,14 @@ def compare_facial_features(feat_a, feat_b):
         else:
             d_struct_cos = 0.5
         raw_struct = float(0.85 * d_struct_cos + 0.15 * min(1.0, aspect_diff * 2.0))
-        d_struct = min(1.0, raw_struct * 3.0)
+        d_struct = min(1.0, raw_struct * 6.0)
 
     # Composite multi-level fusion:
     if d_struct is not None:
         if d_geo is not None:
-            fused_dist = 0.50 * d_struct + 0.35 * d_tex + 0.15 * d_geo
+            fused_dist = 0.65 * d_struct + 0.20 * d_tex + 0.15 * d_geo
         else:
-            fused_dist = 0.60 * d_struct + 0.40 * d_tex
+            fused_dist = 0.75 * d_struct + 0.25 * d_tex
     else:
         if d_geo is not None:
             fused_dist = 0.75 * d_tex + 0.25 * d_geo

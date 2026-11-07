@@ -196,6 +196,8 @@ def extract_template_from_image(image_array):
         raise ValidationError('Eye detection failed while processing the image. Please capture another image.') from exc
     if not eyes:
         raise ValidationError('No eye was detected in the image. Move closer, face the camera, and try again.')
+    if max(eye[2] for eye in eyes) < 40:
+        raise ValidationError('You are too far from the camera. Move closer so your eyes are clearly focused.')
 
     sorted_eyes = sorted(eyes, key=lambda eye: eye[2] * eye[3], reverse=True)
     last_error = None
