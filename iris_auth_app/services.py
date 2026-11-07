@@ -126,12 +126,14 @@ def compare_templates_detailed(code_a, mask_a, code_b, mask_b, max_shift=20, *, 
             fd = module.compare_facial_features(feat_a, feat_b)
             if fd is not None and math.isfinite(fd):
                 face_dist = float(fd)
-                default_weight = float(os.environ.get('IRIS_FACIAL_FEATURE_WEIGHT', '0.20'))
-                if face_dist <= 0.35:
-                    weight = max(default_weight, 0.85)
+                weight = float(os.environ.get('IRIS_FACIAL_FEATURE_WEIGHT', str(FUSION_FACE_WEIGHT)))
+                # Iris gating principle:
+                # If iris Hamming distance indicates an impostor eye (> 0.38), facial similarity
+                # must NEVER override the non-matching eye to grant access.
+                if iris_dist > 0.38:
+                    fused_dist = max(iris_dist, (1.0 - weight) * iris_dist + weight * face_dist)
                 else:
-                    weight = default_weight
-                fused_dist = float((1.0 - weight) * iris_dist + weight * face_dist)
+                    fused_dist = float((1.0 - weight) * iris_dist + weight * face_dist)
         except Exception:
             pass
 
