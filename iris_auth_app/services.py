@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 MODULE_PATH = Path(__file__).resolve().parents[1] / 'iris_extract.py'
 MATCH_THRESHOLD = float(os.environ.get('IRIS_MATCH_THRESHOLD', '0.35'))
 VERIFICATION_THRESHOLD = float(os.environ.get('IRIS_VERIFICATION_THRESHOLD', '0.35'))
-FUSION_FACE_WEIGHT = float(os.environ.get('IRIS_FACIAL_FEATURE_WEIGHT', '0.20'))
+FUSION_FACE_WEIGHT = float(os.environ.get('IRIS_FACIAL_FEATURE_WEIGHT', '0.40'))
 TEMPLATE_ENCODING_VERSION = 'gabor-eye-crop-v2'
 
 _iris_module = None
@@ -130,7 +130,7 @@ def compare_templates_detailed(code_a, mask_a, code_b, mask_b, max_shift=20, *, 
                 # Iris gating principle:
                 # If iris Hamming distance indicates an impostor eye (> 0.38), facial similarity
                 # must NEVER override the non-matching eye to grant access.
-                if iris_dist > 0.38:
+                if iris_dist > 0.45:
                     fused_dist = max(iris_dist, (1.0 - weight) * iris_dist + weight * face_dist)
                 else:
                     fused_dist = float((1.0 - weight) * iris_dist + weight * face_dist)
