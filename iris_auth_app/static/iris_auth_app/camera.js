@@ -163,6 +163,40 @@ function stopCamera() {
   }
 }
 
+function isSharpEnough(sourceCanvas) {
+  // Laplacian variance on a small thumbnail — cheap blur gate (threshold conservative to avoid blocking dim-but-ok frames)
+  try {
+    const tw = 128;
+    const th = Math.max(1, Math.round(sourceCanvas.height * (tw / sourceCanvas.width)));
+    const thumb = document.createElement('canvas');
+    thumb.width = tw; thumb.height = th;
+    const tctx = thumb.getContext('2d', { willReadFrequently: true });
+    if (!tctx) return true; // fail-open: let server decide
+    tctx.drawImage(sourceCanvas, 0, 0, tw, th);
+    const data = tctx.getImageData(0, 0, tw, th).data;
+    const gray = new Float32Array(tw * th);
+    for (let i = 0; i < tw * th; i++) {
+      const o = i * 4;
+      gray[i] = 0.299 * data[o] + 0.587 * data[o + 1] + 0.114 * data[o + 2];
+    }
+    let mean = 0, n = 0;
+    const lap = [];
+    for (let y = 1; y < th - 1; y++) {
+      for (let x = 1; x < tw - 1; x++) {
+        const idx = y * tw + x;
+        const v = 4 * gray[idx] - gray[idx - 1] - gray[idx + 1] - gray[idx - tw] - gray[idx + tw];
+        lap.push(v); mean += v; n++;
+      }
+    }
+    if (!n) return true;
+    mean /= n;
+    let variance = 0;
+    for (const v of lap) variance += (v - mean) * (v - mean);
+    variance /= n;
+    return variance >= 50; // conservative: only skip clearly blurry frames
+  } catch (_) { return true; }
+}
+
 function startLiveScanner() {
   stopLiveScanner();
   liveScanInFlight = false;
@@ -210,6 +244,13 @@ function scanCurrentFrame() {
   }
 
   context.drawImage(cameraPreview, 0, 0, w, h);
+
+  // Client-side quality gate: skip blurry frames before spending server CPU (server gate remains authoritative)
+  if (!isSharpEnough(canvas)) {
+    liveScanInFlight = false;
+    if (scannerBadge) scannerBadge.textContent = 'Hold still — frame blurry';
+    return;
+  }
 
   canvas.toBlob(async (blob) => {
     if (!blob || !stream || isSubmitting) {

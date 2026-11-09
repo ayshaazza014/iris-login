@@ -46,21 +46,28 @@ def detect_face_and_iris(image_or_gray):
         }
 
     if image_or_gray.ndim == 3:
-        gray = cv2.cvtColor(image_or_gray, cv2.COLOR_BGR2GRAY)
+        gray_raw = cv2.cvtColor(image_or_gray, cv2.COLOR_BGR2GRAY)
     else:
-        gray = image_or_gray
+        gray_raw = image_or_gray
+    # CLAHE contrast normalization helps Haar on dark irises / uneven light (kept gray-only)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    gray = clahe.apply(gray_raw)
 
     h, w = gray.shape
-    min_sz = max(40, int(min(h, w) * 0.08))
+    min_sz = max(30, int(min(h, w) * 0.06))
 
-    face_default = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-    face_alt2 = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_alt2.xml")
-    eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_eye.xml")
-    glasses_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_eye_tree_eyeglasses.xml")
+    if not hasattr(detect_face_and_iris, '_cascades'):
+        detect_face_and_iris._cascades = (
+            cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml"),
+            cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_alt2.xml"),
+            cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_eye.xml"),
+            cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_eye_tree_eyeglasses.xml"),
+        )
+    face_default, face_alt2, eye_cascade, glasses_cascade = detect_face_and_iris._cascades
 
     # 1. Face detection (primary + alt2 fallback)
-    min_face = max(70, int(min(h, w) * 0.18))
-    faces = face_default.detectMultiScale(gray, 1.1, 4, minSize=(min_face, min_face))
+    min_face = max(60, int(min(h, w) * 0.15))
+    faces = face_default.detectMultiScale(gray, 1.1, 3, minSize=(min_face, min_face))
     if len(faces) == 0:
         faces = face_alt2.detectMultiScale(gray, 1.1, 3, minSize=(min_face, min_face))
 
@@ -72,28 +79,84 @@ def detect_face_and_iris(image_or_gray):
         fx, fy, fw, fh = faces[0]
         face_box = (int(fx), int(fy), int(fw), int(fh))
 
-        # Restrict ocular search to upper anatomical band (18% - 58% of face)
-        y0 = max(0, int(fy + 0.18 * fh))
-        y1 = min(h, int(fy + 0.58 * fh))
-        x0 = max(0, int(fx + 0.05 * fw))
-        x1 = min(w, int(fx + 0.95 * fw))
+        # Wider ocular band tolerates head tilt / low camera (10% - 65% of face)
+        y0 = max(0, int(fy + 0.10 * fh))
+        y1 = min(h, int(fy + 0.65 * fh))
+        x0 = max(0, int(fx + 0.02 * fw))
+        x1 = min(w, int(fx + 0.98 * fw))
         ocular_roi = gray[y0:y1, x0:x1]
 
         if ocular_roi.size > 0:
-            eye_min = max(25, int(fw * 0.10))
-            detected_in_face = eye_cascade.detectMultiScale(ocular_roi, 1.1, 4, minSize=(eye_min, eye_min))
-            if len(detected_in_face) == 0:
-                detected_in_face = glasses_cascade.detectMultiScale(ocular_roi, 1.1, 3, minSize=(eye_min, eye_min))
+            eye_min = max(20, int(fw * 0.08))
+            detected_in_face = eye_cascade.detectMultiScale(ocular_roi, 1.1, 3, minSize=(eye_min, eye_min))
+            # merge glasses detections when eye cascade finds <2 (glasses frame splits Haar response)
+            if len(detected_in_face) < 2:
+                g = glasses_cascade.detectMultiScale(ocular_roi, 1.1, 3, minSize=(eye_min, eye_min))
+                if len(g) > len(detected_in_face):
+                    detected_in_face = g
             for (ex, ey, ew, eh) in detected_in_face:
                 eyes.append((x0 + ex, y0 + ey, ew, eh))
 
     if not eyes:
         # Fallback to direct eye detection across whole frame (for macro crops or occluded faces)
-        detected = eye_cascade.detectMultiScale(gray, 1.1, 5, minSize=(min_sz, min_sz))
-        if len(detected) == 0:
-            detected = glasses_cascade.detectMultiScale(gray, 1.1, 3, minSize=(min_sz, min_sz))
+        detected = eye_cascade.detectMultiScale(gray, 1.1, 3, minSize=(min_sz, min_sz))
+        if len(detected) < 2:
+            g = glasses_cascade.detectMultiScale(gray, 1.1, 3, minSize=(min_sz, min_sz))
+            if len(g) > len(detected):
+                detected = g
         eyes = [tuple(e) for e in detected]
 
+    # Strict anatomical validation — zero false positives (user requirement)
+    # NMS dedup overlapping boxes on same eye (IoU > 0.3), then symmetry/plausibility checks
+    def _iou(a, b):
+        ax, ay, aw, ah = a; bx, by, bw, bh = b
+        x0, y0 = max(ax, bx), max(ay, by)
+        x1, y1 = min(ax+aw, bx+bw), min(ay+ah, by+bh)
+        inter = max(0, x1-x0) * max(0, y1-y0)
+        if inter == 0: return 0.0
+        return inter / float(aw*ah + bw*bh - inter)
+    eyes = sorted(eyes, key=lambda e: e[2]*e[3], reverse=True)
+    dedup = []
+    for e in eyes:
+        if not any(_iou(e, k) > 0.3 for k in dedup):
+            dedup.append(tuple(e))
+    eyes = dedup[:4]
+    # sort L-R for pair checks
+    eyes = sorted(eyes, key=lambda e: e[0])
+    if face_box is not None and len(eyes) >= 2:
+        fx, fy, fw, fh = face_box
+        # keep only best plausible pair; reject pair if anatomy implausible
+        best = None
+        for i in range(len(eyes)):
+            for j in range(i+1, len(eyes)):
+                e1, e2 = eyes[i], eyes[j]
+                c1 = (e1[0]+e1[2]/2, e1[1]+e1[3]/2); c2 = (e2[0]+e2[2]/2, e2[1]+e2[3]/2)
+                iod = np.hypot(c2[0]-c1[0], c2[1]-c1[1])
+                ratio = iod / max(1, fw)
+                inside = all(fx<=c[0]<=fx+fw and fy<=c[1]<=fy+fh for c in (c1, c2))
+                size_ratio = max(e1[2]*e1[3], e2[2]*e2[3]) / max(1, min(e1[2]*e1[3], e2[2]*e2[3]))
+                valign = abs(c1[1]-c2[1]) / max(1, max(e1[3], e2[3]))
+                if inside and 0.25 <= ratio <= 0.60 and size_ratio < 2.0 and valign < 0.8:
+                    score = e1[2]*e1[3] + e2[2]*e2[3]
+                    if best is None or score > best[0]:
+                        best = (score, (e1, e2))
+        if best is not None:
+            eyes = list(best[1])
+        else:
+            # no plausible pair — keep largest single eye inside face only, else no eyes (no false positive)
+            inside_eyes = [e for e in eyes if (fx <= e[0]+e[2]/2 <= fx+fw and fy <= e[1]+e[3]/2 <= fy+fh)]
+            eyes = sorted(inside_eyes, key=lambda e: e[2]*e[3], reverse=True)[:1]
+    elif face_box is not None and len(eyes) == 1:
+        fx, fy, fw, fh = face_box
+        ex, ey, ew, eh = eyes[0]
+        cx, cy = ex+ew/2, ey+eh/2
+        if not (fx <= cx <= fx+fw and fy <= cy <= fy+fh):
+            eyes = []
+        else:
+            # single-eye area must be plausible fraction of face
+            area_frac = (ew*eh) / max(1, fw*fh)
+            if area_frac < 0.002 or area_frac > 0.12:
+                eyes = []
     eyes = sorted(eyes, key=lambda e: e[2] * e[3], reverse=True)[:2]
     eyes = sorted([tuple(e) for e in eyes], key=lambda e: e[0])
 
@@ -103,11 +166,23 @@ def detect_face_and_iris(image_or_gray):
         cx1, cy1 = e1[0] + e1[2] / 2.0, e1[1] + e1[3] / 2.0
         cx2, cy2 = e2[0] + e2[2] / 2.0, e2[1] + e2[3] / 2.0
         iod = np.hypot(cx2 - cx1, cy2 - cy1)
-        est_fw = int(iod * 2.2)
-        est_fh = int(est_fw * 1.3)
-        est_fx = max(0, int((cx1 + cx2) / 2.0 - est_fw / 2.0))
-        est_fy = max(0, int((cy1 + cy2) / 2.0 - 0.38 * est_fh))
-        face_box = (est_fx, est_fy, min(w - est_fx, est_fw), min(h - est_fy, est_fh))
+        # strict whole-frame pair validation (zero false positives)
+        size_ratio = max(e1[2]*e1[3], e2[2]*e2[3]) / max(1, min(e1[2]*e1[3], e2[2]*e2[3]))
+        valign = abs(cy1-cy2) / max(1, max(e1[3], e2[3]))
+        # reject border-touching artifacts (ceiling/fan) and misaligned pairs
+        border = (e1[1] < 10 or e2[1] < 10 or e1[0] < 10 or e2[0] < 10)
+        if size_ratio >= 2.0 or valign >= 0.8 or border or not (20 <= iod <= 0.6 * min(w, h)):
+            eyes = sorted(eyes, key=lambda e: e[2]*e[3], reverse=True)[:1]
+        if len(eyes) == 2:
+            e1, e2 = eyes[0], eyes[1]
+            cx1, cy1 = e1[0] + e1[2] / 2.0, e1[1] + e1[3] / 2.0
+            cx2, cy2 = e2[0] + e2[2] / 2.0, e2[1] + e2[3] / 2.0
+            iod = np.hypot(cx2 - cx1, cy2 - cy1)
+            est_fw = int(iod * 2.2)
+            est_fh = int(est_fw * 1.3)
+            est_fx = max(0, int((cx1 + cx2) / 2.0 - est_fw / 2.0))
+            est_fy = max(0, int((cy1 + cy2) / 2.0 - 0.38 * est_fh))
+            face_box = (est_fx, est_fy, min(w - est_fx, est_fw), min(h - est_fy, est_fh))
 
     # 2. Iris and Pupil localization for each detected eye
     irises = []

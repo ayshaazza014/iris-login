@@ -13,9 +13,9 @@ from .models import IrisTemplate, IrisUser
 
 logger = logging.getLogger(__name__)
 MODULE_PATH = Path(__file__).resolve().parents[1] / 'iris_extract.py'
-MATCH_THRESHOLD = float(os.environ.get('IRIS_MATCH_THRESHOLD', '0.40'))
-VERIFICATION_THRESHOLD = float(os.environ.get('IRIS_VERIFICATION_THRESHOLD', '0.40'))
-FUSION_FACE_WEIGHT = float(os.environ.get('IRIS_FACIAL_FEATURE_WEIGHT', '0.50'))
+MATCH_THRESHOLD = float(os.environ.get('IRIS_MATCH_THRESHOLD', '0.32'))
+VERIFICATION_THRESHOLD = float(os.environ.get('IRIS_VERIFICATION_THRESHOLD', '0.35'))
+FUSION_FACE_WEIGHT = float(os.environ.get('IRIS_FACIAL_FEATURE_WEIGHT', '0.20'))
 TEMPLATE_ENCODING_VERSION = 'gabor-eye-crop-v2'
 
 _iris_module = None
@@ -126,7 +126,14 @@ def compare_templates_detailed(code_a, mask_a, code_b, mask_b, max_shift=20, *, 
             fd = module.compare_facial_features(feat_a, feat_b)
             if fd is not None and math.isfinite(fd):
                 face_dist = float(fd)
-                weight = float(os.environ.get('IRIS_FACIAL_FEATURE_WEIGHT', str(FUSION_FACE_WEIGHT)))
+                # Adaptive: high-confidence periocular agreement (d_face<=0.35) boosts face weight to help dark irises;
+                # otherwise keep low base weight so noisy face cannot veto a good iris
+                if os.environ.get('IRIS_FACIAL_FEATURE_WEIGHT') is not None:
+                    weight = float(os.environ['IRIS_FACIAL_FEATURE_WEIGHT'])
+                elif face_dist <= 0.35:
+                    weight = 0.50
+                else:
+                    weight = FUSION_FACE_WEIGHT
                 fused_dist = float((1.0 - weight) * iris_dist + weight * face_dist)
         except Exception:
             pass

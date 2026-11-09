@@ -153,8 +153,70 @@ class Command(BaseCommand):
             action='store_true',
             help='Run a rapid evaluation with a smaller cohort.',
         )
+        parser.add_argument(
+            '--real-captures',
+            action='store_true',
+            help='Evaluate on consented real debug captures (debug_captures/) instead of synthetic textures.',
+        )
+
+    def handle_real_captures(self, *args, **options):
+        import glob, os, json
+        report_path = Path(options.get('output_report') or 'docs/EVALUATION_REPORT_REAL.md')
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        base = Path(settings.BASE_DIR) / 'debug_captures'
+        # Consented labeled samples + enrolled faces; fall back to face_*_enrolled.jpg
+        candidates = sorted(glob.glob(str(base / 'labeled_samples' / '*.jpg')))
+        if not candidates:
+            candidates = sorted(glob.glob(str(base / 'face_*_enrolled.jpg')))
+        if not candidates:
+            self.stdout.write(self.style.WARNING('No real captures found in debug_captures/. Run live logins or add consented labeled_samples/.'))
+            return
+        self.stdout.write(f'Real captures: {len(candidates)} files from {candidates[0]} ...')
+        # Group by filename prefix (user) when available, else per-file subject
+        cohort = {}
+        import re
+        for path in candidates:
+            m = re.match(r'^([^_]+)_.*', Path(path).name)
+            sid = m.group(1) if m else Path(path).stem[:10]
+            img = cv2.imread(path)
+            if img is None: continue
+            try:
+                code, mask = extract_template_from_image(img)
+                feat = extract_facial_features(img)
+                cohort.setdefault(sid, []).append({'code': code, 'mask': mask, 'facial': feat})
+            except Exception as exc:
+                self.stdout.write(f'skip {Path(path).name}: {exc}')
+                continue
+        self.stdout.write(f'Enrolled {sum(len(v) for v in cohort.values())} templates across {len(cohort)} subjects.')
+        genuine, impostor = [], []
+        sids = list(cohort)
+        for i, s1 in enumerate(sids):
+            for a in range(len(cohort[s1])):
+                for b in range(a+1, len(cohort[s1])):
+                    genuine.append(compare_templates(cohort[s1][a]['code'], cohort[s1][a]['mask'], cohort[s1][b]['code'], cohort[s1][b]['mask'], feat_a=cohort[s1][a]['facial'], feat_b=cohort[s1][b]['facial']))
+        for i in range(len(sids)):
+            for j in range(i+1, len(sids)):
+                for t1 in cohort[sids[i]]:
+                    for t2 in cohort[sids[j]]:
+                        impostor.append(compare_templates(t1['code'], t1['mask'], t2['code'], t2['mask'], feat_a=t1['facial'], feat_b=t2['facial']))
+        g = np.array([d for d in genuine if math.isfinite(d)]); im = np.array([d for d in impostor if math.isfinite(d)])
+        self.stdout.write(f'Genuine N={len(g)} mean={np.mean(g) if len(g) else 0:.4f} | Impostor N={len(im)} mean={np.mean(im) if len(im) else 0:.4f}')
+        for th in [0.28, 0.30, 0.32, 0.35, 0.38]:
+            far = float(np.mean(im <= th)*100) if len(im) else 0.0
+            frr = float(np.mean(g > th)*100) if len(g) else 0.0
+            self.stdout.write(f'T={th:.2f} FAR={far:.2f}% FRR={frr:.2f}%')
+        md = f"# Real-Capture Evaluation (consented debug_captures)\n\nSubjects: {len(sids)} | Genuine N={len(g)} | Impostor N={len(im)}\n\nThreshold sweep (fused distance):\n"
+        for th in [0.28, 0.30, 0.32, 0.35, 0.38]:
+            far = float(np.mean(im <= th)*100) if len(im) else 0.0
+            frr = float(np.mean(g > th)*100) if len(g) else 0.0
+            md += f"| {th:.2f} | {far:.2f}% | {frr:.2f}% |\n"
+        md += "\nLimitations: small consented cohort, visible-light webcam, no PAD. Do not deploy beyond demo.\n"
+        report_path.write_text(md, encoding='utf-8')
+        self.stdout.write(self.style.SUCCESS(f'Real report: {report_path}'))
 
     def handle(self, *args, **options):
+        if options.get('real_captures'):
+            return self.handle_real_captures(*args, **options)
         subjects_count = options['subjects']
         samples_per_subject = options['samples_per_subject']
         if options['quick']:

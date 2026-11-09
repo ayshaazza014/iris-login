@@ -60,6 +60,8 @@ if not DEBUG:
 IRIS_TRUST_PROXY_HEADERS = os.environ.get('IRIS_TRUST_PROXY_HEADERS', 'false').lower() in ('true', '1')
 IRIS_ALLOW_OPEN_REGISTRATION = os.environ.get('IRIS_ALLOW_OPEN_REGISTRATION', 'true').lower() in ('true', '1')
 IRIS_REQUIRE_1_TO_1_IDENTIFIER = os.environ.get('IRIS_REQUIRE_1_TO_1_IDENTIFIER', 'false').lower() in ('true', '1')
+# Biometric debug capture is DEBUG-only by default (privacy: no raw biometrics in prod)
+IRIS_ENABLE_IMAGE_LOGGING = os.environ.get('IRIS_ENABLE_IMAGE_LOGGING', 'true' if DEBUG else 'false').lower() in ('true', '1', 'yes')
 
 AUTH_USER_MODEL = 'iris_auth_app.IrisUser'
 LOGIN_URL = 'login'

@@ -9,7 +9,8 @@ from django.conf import settings
 logger = logging.getLogger('iris_debug_logger')
 
 DEBUG_DIR = getattr(settings, 'IRIS_DEBUG_DIR', os.path.join(settings.BASE_DIR, 'debug_captures'))
-ENABLE_LOGGING = getattr(settings, 'IRIS_ENABLE_IMAGE_LOGGING', True)
+# Privacy: DEBUG-only by default — no raw biometrics written in prod unless explicitly opted in
+ENABLE_LOGGING = getattr(settings, 'IRIS_ENABLE_IMAGE_LOGGING', getattr(settings, 'DEBUG', False))
 
 
 def _ensure_dir(path):
@@ -55,11 +56,11 @@ def _annotate_capture(image_array, detection, banner_text, sub_text=""):
         cv2.putText(annotated, f"EYE #{idx+1}", (int(ex), max(20, int(ey) - 6)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 220, 0), 1, cv2.LINE_AA)
 
-    # Draw iris/pupil circles if present
+    # Draw iris/pupil circles if present (iris_extract returns iris_circle/pupil_circle)
     irises = detection.get('irises', [])
     for iris_info in irises:
-        iris_circle = iris_info.get('iris')
-        pupil_circle = iris_info.get('pupil')
+        iris_circle = iris_info.get('iris_circle') or iris_info.get('iris')
+        pupil_circle = iris_info.get('pupil_circle') or iris_info.get('pupil')
         if iris_circle:
             cv2.circle(annotated, (int(iris_circle[0]), int(iris_circle[1])),
                        int(iris_circle[2]), (0, 0, 255), 2)
