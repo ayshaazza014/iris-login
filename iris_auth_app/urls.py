@@ -9,6 +9,7 @@ urlpatterns = [
     path('staff/login/', views.staff_login_view, name='staff_login'),
     path('staff/register/', views.staff_register_view, name='staff_register'),
     path('staff/dashboard/', views.staff_dashboard, name='staff_dashboard'),
+    path('staff/attendance/', views.staff_attendance, name='staff_attendance'),
     path('staff/re-enroll/', views.staff_reenroll_view, name='staff_reenroll'),
     path('verify-iris/', views.verify_iris, name='verify_iris'),
     path('dashboard/', views.dashboard, name='dashboard'),

@@ -37,10 +37,11 @@
     </div>
 
     <div class="form-actions" style="margin-top: 28px;">
+        <a href="{% url 'staff_attendance' %}" class="primary-btn">Edit Student Attendance</a>
         <a href="{% url 'staff_reenroll' %}" class="secondary-btn">Re-enroll student iris</a>
         <form method="post" action="{% url 'logout' %}">
             {% csrf_token %}
-            <button type="submit" class="primary-btn">Logout</button>
+            <button type="submit" class="secondary-btn">Logout</button>
         </form>
     </div>
 </section>

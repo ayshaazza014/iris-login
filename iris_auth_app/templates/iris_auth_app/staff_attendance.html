@@ -1,0 +1,100 @@
+﻿{% extends 'iris_auth_app/base.html' %}
+
+{% block title %}Edit Student Attendance | SmartCampus{% endblock %}
+
+{% block content %}
+<section class="dashboard-shell">
+    <header class="dashboard-header">
+        <div>
+            <span class="section-eyebrow">STAFF PORTAL</span>
+            <h1>Student Attendance</h1>
+            <p>Select a student and update attendance (classes attended vs total classes) for each subject.</p>
+        </div>
+        <a href="{% url 'staff_dashboard' %}" class="secondary-btn">Back to Staff Dashboard</a>
+    </header>
+
+    <article class="future-panel" style="margin-bottom:20px;">
+        <form method="get" action="{% url 'staff_attendance' %}" class="form-grid" style="max-width:520px;">
+            <label for="student">Student</label>
+            <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                <select id="student" name="student" required style="min-width:260px; padding:10px; border:1px solid var(--campus-border); border-radius:8px;">
+                    <option value="">-- Select a student --</option>
+                    {% for s in students %}
+                        <option value="{{ s.id }}" {% if selected_student and selected_student.id == s.id %}selected{% endif %}>{{ s.display_name|default:s.username }} ({{ s.username }})</option>
+                    {% endfor %}
+                </select>
+                <button type="submit" class="primary-btn">Load</button>
+            </div>
+        </form>
+    </article>
+
+    {% if selected_student %}
+    <article class="future-panel">
+        <h2 style="margin-top:0;">Attendance for {{ selected_student.display_name|default:selected_student.username }}</h2>
+        <p style="color:var(--text-muted,#666); margin-bottom:16px;">Edit attended and total classes, then save. Attended must be less than or equal to total.</p>
+        <form method="post" action="{% url 'staff_attendance' %}">
+            {% csrf_token %}
+            <input type="hidden" name="student_id" value="{{ selected_student.id }}">
+            {% if records %}
+            <div style="overflow-x:auto;">
+                <table style="width:100%; border-collapse: collapse;">
+                    <thead>
+                        <tr style="text-align:left; border-bottom:1px solid var(--campus-border);">
+                            <th style="padding:10px;">Subject</th>
+                            <th style="padding:10px;">Attended</th>
+                            <th style="padding:10px;">Total Classes</th>
+                            <th style="padding:10px;">Current %</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for record in records %}
+                        <tr style="border-bottom:1px solid var(--campus-border);">
+                            <td style="padding:10px; font-weight:600;">{{ record.subject }}</td>
+                            <td style="padding:10px;">
+                                <input type="number" name="attended_{{ record.id }}" value="{{ record.attended_classes }}" min="0" required style="width:100px; padding:8px; border:1px solid var(--campus-border); border-radius:6px;">
+                            </td>
+                            <td style="padding:10px;">
+                                <input type="number" name="total_{{ record.id }}" value="{{ record.total_classes }}" min="0" required style="width:100px; padding:8px; border:1px solid var(--campus-border); border-radius:6px;">
+                            </td>
+                            <td style="padding:10px;">{{ record.attendance_percentage }}%</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p>No attendance records found for this student. You can add one below.</p>
+            {% endif %}
+
+            <h3 style="margin-top:22px;">Add New Subject (optional)</h3>
+            <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; margin-bottom:16px;">
+                <div>
+                    <label for="new_subject" style="display:block; margin-bottom:4px;">Subject</label>
+                    <input id="new_subject" type="text" name="new_subject" placeholder="e.g. AI" style="padding:8px; border:1px solid var(--campus-border); border-radius:6px; min-width:180px;">
+                </div>
+                <div>
+                    <label for="new_attended" style="display:block; margin-bottom:4px;">Attended</label>
+                    <input id="new_attended" type="number" name="new_attended" min="0" value="0" style="width:100px; padding:8px; border:1px solid var(--campus-border); border-radius:6px;">
+                </div>
+                <div>
+                    <label for="new_total" style="display:block; margin-bottom:4px;">Total Classes</label>
+                    <input id="new_total" type="number" name="new_total" min="0" value="0" style="width:100px; padding:8px; border:1px solid var(--campus-border); border-radius:6px;">
+                </div>
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="primary-btn">Save Attendance</button>
+            </div>
+        </form>
+    </article>
+    {% elif students %}
+    <article class="future-panel">
+        <p>Select a student above to view and edit their attendance.</p>
+    </article>
+    {% else %}
+    <article class="future-panel">
+        <p>No registered students found.</p>
+    </article>
+    {% endif %}
+</section>
+{% endblock %}

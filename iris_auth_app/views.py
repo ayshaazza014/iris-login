@@ -15,9 +15,10 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.views.decorators.http import require_http_methods
 
-from .models import IrisTemplate, IrisUser
+from .models import AttendanceRecord, IrisTemplate, IrisUser
 from .services import (
     TEMPLATE_ENCODING_VERSION,
     detect_face_and_iris,
@@ -766,6 +767,78 @@ def staff_dashboard(request):
     if not request.user.is_staff:
         raise PermissionDenied
     return render(request, 'iris_auth_app/staff_dashboard.html', {'user': request.user})
+
+
+@login_required(login_url='staff_login')
+@require_http_methods(["GET", "POST"])
+def staff_attendance(request):
+    if not request.user.is_staff:
+        raise PermissionDenied
+
+    students = IrisUser.objects.filter(is_staff=False, is_superuser=False).order_by('display_name', 'username')
+    student_id = request.GET.get('student') or request.POST.get('student_id')
+    selected_student = students.filter(pk=student_id).first() if student_id else None
+
+    if request.method == 'POST' and selected_student:
+        records = list(selected_student.attendance_records.all())
+        errors = []
+        updates = []
+        for record in records:
+            attended_raw = (request.POST.get(f'attended_{record.id}') or '').strip()
+            total_raw = (request.POST.get(f'total_{record.id}') or '').strip()
+            try:
+                attended = int(attended_raw)
+                total = int(total_raw)
+                if attended < 0 or total < 0 or attended > total:
+                    raise ValueError
+            except (TypeError, ValueError):
+                errors.append(f'Invalid values for {record.subject} (attended must be ≤ total).')
+            else:
+                updates.append((record, attended, total))
+
+        new_subject = (request.POST.get('new_subject') or '').strip()
+        new_attended_raw = (request.POST.get('new_attended') or '').strip()
+        new_total_raw = (request.POST.get('new_total') or '').strip()
+        new_record = None
+        if new_subject or new_attended_raw or new_total_raw:
+            if not new_subject:
+                errors.append('Subject name is required to add a new attendance record.')
+            else:
+                try:
+                    new_attended = int(new_attended_raw or '0')
+                    new_total = int(new_total_raw or '0')
+                    if new_attended < 0 or new_total < 0 or new_attended > new_total:
+                        raise ValueError
+                except (TypeError, ValueError):
+                    errors.append('Invalid values for the new subject (attended must be ≤ total).')
+                else:
+                    new_record = (new_subject, new_attended, new_total)
+
+        if errors:
+            for err in errors:
+                messages.error(request, err)
+        else:
+            for record, attended, total in updates:
+                if record.attended_classes != attended or record.total_classes != total:
+                    record.attended_classes = attended
+                    record.total_classes = total
+                    record.save(update_fields=['attended_classes', 'total_classes', 'updated_at'])
+            if new_record:
+                subject, attended, total = new_record
+                AttendanceRecord.objects.update_or_create(
+                    student=selected_student,
+                    subject=subject,
+                    defaults={'attended_classes': attended, 'total_classes': total},
+                )
+            messages.success(request, f'Attendance updated for {selected_student.display_name or selected_student.username}.')
+            return redirect(f"{reverse('staff_attendance')}?student={selected_student.pk}")
+
+    records = list(selected_student.attendance_records.all()) if selected_student else []
+    return render(request, 'iris_auth_app/staff_attendance.html', {
+        'students': students,
+        'selected_student': selected_student,
+        'records': records,
+    })
 
 
 @require_http_methods(["POST"])
