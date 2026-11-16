@@ -9,7 +9,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.test import Client, TestCase
 
-from .models import IrisTemplate, IrisUser
+from .models import AttendanceRecord, IrisTemplate, IrisUser
 from .services import (
     TEMPLATE_ENCODING_VERSION,
     ensure_iris_template_for_user,
@@ -495,6 +495,56 @@ class IrisVerificationTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Iris Re-enrollment')
+
+    def test_staff_can_open_attendance_editor(self):
+        staff = IrisUser.objects.create_user(username='attendance-staff', is_staff=True)
+        student = IrisUser.objects.create_user(username='attendance-student', display_name='Attendance Student')
+        AttendanceRecord.objects.create(
+            student=student,
+            subject='AI',
+            attended_classes=8,
+            total_classes=10,
+        )
+        self.client.force_login(staff)
+
+        response = self.client.get('/staff/attendance/', {'student': student.pk})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Attendance')
+        self.assertContains(response, 'Attendance Student')
+
+    def test_non_staff_cannot_open_attendance_editor(self):
+        student = IrisUser.objects.create_user(username='attendance-non-staff')
+
+        self.client.force_login(student)
+        response = self.client.get('/staff/attendance/')
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_staff_can_update_student_attendance(self):
+        staff = IrisUser.objects.create_user(username='attendance-editor', is_staff=True)
+        student = IrisUser.objects.create_user(username='attendance-target')
+        record = AttendanceRecord.objects.create(
+            student=student,
+            subject='EVS',
+            attended_classes=5,
+            total_classes=12,
+        )
+        self.client.force_login(staff)
+
+        response = self.client.post(
+            '/staff/attendance/',
+            {
+                'student_id': str(student.pk),
+                f'attended_{record.pk}': '10',
+                f'total_{record.pk}': '12',
+            },
+        )
+
+        self.assertRedirects(response, f'/staff/attendance/?student={student.pk}')
+        record.refresh_from_db()
+        self.assertEqual(record.attended_classes, 10)
+        self.assertEqual(record.total_classes, 12)
 
     def test_non_staff_cannot_open_reenrollment_page(self):
         student = IrisUser.objects.create_user(username='ordinary-student', password='StrongPass123')
@@ -1007,6 +1057,29 @@ class SecurityAndAuthenticationHardeningTests(TestCase):
         alice = IrisUser.objects.filter(username='alice').first()
         self.assertIsNotNone(alice)
 
+    def test_seed_users_enrolls_staff_demo_template(self):
+        call_command('seed_users', '--demo')
+        staff = IrisUser.objects.filter(username='staff_alice').first()
+        self.assertIsNotNone(staff)
+        self.assertTrue(hasattr(staff, 'iris_template'))
+        self.assertEqual(staff.iris_template.encoding_version, TEMPLATE_ENCODING_VERSION)
+
+    def test_large_phone_photo_is_downscaled_before_processing(self):
+        import cv2
+
+        from iris_auth_app.views import PROCESSING_MAX_DIMENSION, _decode_capture
+
+        large = np.full((2000, 3000, 3), 180, dtype=np.uint8)
+        ok, encoded = cv2.imencode('.png', large)
+        self.assertTrue(ok)
+        decoded = _decode_capture(
+            SimpleUploadedFile('phone.png', encoded.tobytes(), content_type='image/png')
+        )
+
+        self.assertEqual(max(decoded.shape[:2]), PROCESSING_MAX_DIMENSION)
+        self.assertLess(decoded.shape[0], large.shape[0])
+        self.assertLess(decoded.shape[1], large.shape[1])
+
     def test_evaluate_management_command(self):
         import os, tempfile
         with tempfile.NamedTemporaryFile(suffix='.md', delete=False) as tmp:
@@ -1027,6 +1100,32 @@ class SecurityAndAuthenticationHardeningTests(TestCase):
             response = self.client.post('/login/', {'capture': make_capture()})
             self.assertEqual(response.status_code, 200)
             self.assertContains(response, 'An account identifier')
+
+    def test_login_without_enrolled_templates_is_actionable(self):
+        response = self.client.get('/login/')
+        self.assertContains(response, 'No student iris accounts are enrolled yet.')
+
+        response = self.client.post(
+            '/login/',
+            {'capture': make_capture(), 'ajax': 'true'},
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload.get('status'), 'no_templates')
+        self.assertEqual(payload.get('register_url'), '/register/')
+
+    def test_staff_login_without_enrolled_templates_is_actionable(self):
+        response = self.client.get('/staff/login/')
+        self.assertContains(response, 'No staff iris accounts are enrolled yet.')
+
+        response = self.client.post(
+            '/staff/login/',
+            {'capture': make_capture(), 'ajax': 'true'},
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json().get('status'), 'no_templates')
 
     def test_allow_open_registration_setting(self):
         with self.settings(IRIS_ALLOW_OPEN_REGISTRATION=False):
@@ -1114,6 +1213,79 @@ class FacialFeaturesAndMultimodalTests(TestCase):
         self.assertGreater(d_fused, 0.0)
         self.assertLessEqual(d_fused, 1.0)
 
+    def test_face_embedding_is_absent_for_macro_eye_capture(self):
+        from iris_auth_app.services import extract_face_embedding
+
+        image = cv2.imread(str(Path(__file__).resolve().parent.parent / 'synthetic_eye.png'))
+        self.assertIsNone(extract_face_embedding(image))
+
+    def test_face_embedding_round_trip(self):
+        user = IrisUser.objects.create_user(username='face_embedding_user')
+        code = np.zeros((8, 16), dtype=np.uint8)
+        mask = np.ones((8, 16), dtype=np.uint8)
+        embedding = np.linspace(0.01, 1.0, 128, dtype=np.float32)
+
+        template = IrisTemplate.create_for_user(
+            user, code, mask, face_embedding_array=embedding
+        )
+
+        loaded = template.get_face_embedding()
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded.shape, (128,))
+        np.testing.assert_allclose(loaded, embedding, rtol=1e-5)
+
+    def test_verify_iris_face_assist_rescues_marginal_iris_match(self):
+        from iris_auth_app.services import verify_iris_for_user
+
+        user = IrisUser.objects.create_user(username='face_rescue_user')
+        code = np.zeros((8, 64), dtype=np.uint8)
+        mask = np.ones((8, 64), dtype=np.uint8)
+        embedding = np.ones(128, dtype=np.float32)
+        IrisTemplate.create_for_user(
+            user,
+            code,
+            mask,
+            face_embedding_array=embedding,
+            encoding_version=TEMPLATE_ENCODING_VERSION,
+        )
+
+        with (
+            patch('iris_auth_app.services.extract_template_from_image', return_value=(code, mask)),
+            patch('iris_auth_app.services.extract_secondary_template_from_image', return_value=(None, None)),
+            patch('iris_auth_app.services.extract_facial_features', return_value=None),
+            patch('iris_auth_app.services.extract_face_embedding', return_value=embedding),
+            patch('iris_auth_app.services.compare_templates', return_value=0.40),
+        ):
+            verified = verify_iris_for_user('face_rescue_user', np.zeros((80, 80, 3), dtype=np.uint8))
+
+        self.assertIsNotNone(verified)
+        self.assertEqual(verified.pk, user.pk)
+
+    def test_verify_iris_face_assist_rejects_a_different_face(self):
+        from iris_auth_app.services import verify_iris_for_user
+
+        user = IrisUser.objects.create_user(username='face_rescue_reject_user')
+        code = np.zeros((8, 64), dtype=np.uint8)
+        mask = np.ones((8, 64), dtype=np.uint8)
+        IrisTemplate.create_for_user(
+            user,
+            code,
+            mask,
+            face_embedding_array=np.ones(128, dtype=np.float32),
+            encoding_version=TEMPLATE_ENCODING_VERSION,
+        )
+
+        with (
+            patch('iris_auth_app.services.extract_template_from_image', return_value=(code, mask)),
+            patch('iris_auth_app.services.extract_secondary_template_from_image', return_value=(None, None)),
+            patch('iris_auth_app.services.extract_facial_features', return_value=None),
+            patch('iris_auth_app.services.extract_face_embedding', return_value=-np.ones(128, dtype=np.float32)),
+            patch('iris_auth_app.services.compare_templates', return_value=0.40),
+        ):
+            verified = verify_iris_for_user('face_rescue_reject_user', np.zeros((80, 80, 3), dtype=np.uint8))
+
+        self.assertIsNone(verified)
+
     def test_model_facial_features_round_trip(self):
         user = IrisUser.objects.create_user(username='face_test_user')
         code = np.zeros((8, 16), dtype=np.uint8)
@@ -1161,6 +1333,12 @@ class FacialFeaturesAndMultimodalTests(TestCase):
             display_name='Ajax Staff',
             is_staff=True,
         )
+        IrisTemplate.create_for_user(
+            staff,
+            np.zeros((8, 64), dtype=np.uint8),
+            np.ones((8, 64), dtype=np.uint8),
+            encoding_version=TEMPLATE_ENCODING_VERSION,
+        )
         with patch('iris_auth_app.views.identify_user_from_iris_result', return_value=(staff, None)):
             response = self.client.post(
                 '/staff/login/',
@@ -1174,6 +1352,13 @@ class FacialFeaturesAndMultimodalTests(TestCase):
             self.assertEqual(data.get('username'), 'ajax_staff')
 
     def test_staff_login_ajax_failure_returns_retry_json(self):
+        staff = IrisUser.objects.create_user(username='ajax_staff_failure', is_staff=True)
+        IrisTemplate.create_for_user(
+            staff,
+            np.zeros((8, 64), dtype=np.uint8),
+            np.ones((8, 64), dtype=np.uint8),
+            encoding_version=TEMPLATE_ENCODING_VERSION,
+        )
         with patch('iris_auth_app.views.identify_user_from_iris_result', return_value=(None, 'no_match')):
             response = self.client.post(
                 '/staff/login/',

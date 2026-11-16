@@ -19,17 +19,186 @@ import argparse
 import functools
 import glob
 import os
+import threading
+from pathlib import Path
 
 import cv2
 import numpy as np
 
 NORM_H, NORM_W = 64, 512  # normalised iris size (radial x angular)
 
+# Optional DNN models shared with the face-detection project. Both are loaded
+# through OpenCV, so no extra Python dependency is needed.
+MODEL_DIR = Path(os.environ.get('IRIS_MODEL_DIR', Path(__file__).resolve().parent / 'models'))
+YUNET_MODEL_PATH = MODEL_DIR / 'face_detection_yunet_2023mar.onnx'
+SFACE_MODEL_PATH = MODEL_DIR / 'face_recognition_sface_2021dec.onnx'
+
+_yunet_detector = None
+_yunet_load_attempted = False
+_yunet_lock = threading.Lock()
+_yunet_inference_lock = threading.Lock()
+
+_sface_recognizer = None
+_sface_load_attempted = False
+_sface_lock = threading.Lock()
+
+
+def get_yunet_detector():
+    """Load the optional YuNet face detector once. Returns None when unavailable."""
+    global _yunet_detector, _yunet_load_attempted
+    if _yunet_load_attempted:
+        return _yunet_detector
+    with _yunet_lock:
+        if not _yunet_load_attempted:
+            _yunet_load_attempted = True
+            if YUNET_MODEL_PATH.is_file():
+                try:
+                    _yunet_detector = cv2.FaceDetectorYN.create(
+                        str(YUNET_MODEL_PATH), '', (320, 320), 0.6, 0.3, 5000
+                    )
+                except cv2.error:
+                    _yunet_detector = None
+    return _yunet_detector
+
+
+def get_sface_recognizer():
+    """Load the optional SFace recognizer once. Returns None when unavailable."""
+    global _sface_recognizer, _sface_load_attempted
+    if _sface_load_attempted:
+        return _sface_recognizer
+    with _sface_lock:
+        if not _sface_load_attempted:
+            _sface_load_attempted = True
+            if SFACE_MODEL_PATH.is_file():
+                try:
+                    _sface_recognizer = cv2.FaceRecognizerSF.create(str(SFACE_MODEL_PATH), '')
+                except cv2.error:
+                    _sface_recognizer = None
+    return _sface_recognizer
+
+
+def detect_face_yunet(image):
+    """Detect the largest face with YuNet.
+
+    Returns a dict with ``box``, five ``landmarks``, ``row`` (the 15-value row
+    SFace alignment expects) and ``confidence``, or None.
+    """
+    detector = get_yunet_detector()
+    if detector is None or image is None or getattr(image, 'size', 0) == 0:
+        return None
+
+    if image.ndim == 2:
+        image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+    elif image.ndim == 3 and image.shape[2] == 4:
+        image = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
+
+    height, width = image.shape[:2]
+    with _yunet_inference_lock:
+        detector.setInputSize((width, height))
+        _, faces = detector.detect(image)
+    if faces is None or len(faces) == 0:
+        return None
+
+    row = max(faces, key=lambda item: float(item[2]) * float(item[3]))
+    box = (int(row[0]), int(row[1]), int(row[2]), int(row[3]))
+    landmarks = tuple(
+        (float(row[4 + 2 * index]), float(row[5 + 2 * index])) for index in range(5)
+    )
+    return {
+        'box': box,
+        'landmarks': landmarks,
+        'confidence': float(row[14]),
+        'row': np.asarray(row, dtype=np.float32),
+    }
+
+
+def _eye_boxes_from_landmarks(landmarks, face_box, image_shape):
+    """Build eye ROI boxes from YuNet's right-eye and left-eye landmarks."""
+    if len(landmarks) < 2:
+        return []
+    _, _, face_width, face_height = face_box
+    height, width = image_shape[:2]
+    eye_width = max(24, int(face_width * 0.32))
+    eye_height = max(18, int(face_height * 0.20))
+    boxes = []
+    for center_x, center_y in landmarks[:2]:
+        x1 = max(0, int(center_x - eye_width / 2))
+        y1 = max(0, int(center_y - eye_height / 2))
+        x2 = min(width, x1 + eye_width)
+        y2 = min(height, y1 + eye_height)
+        if x2 - x1 >= 12 and y2 - y1 >= 12:
+            boxes.append((x1, y1, x2 - x1, y2 - y1))
+    return sorted(boxes, key=lambda box: box[0])
+
+
+def extract_face_embedding(image):
+    """Return a 128-D SFace embedding for the largest face, or None."""
+    if image is None:
+        return None
+    if image.ndim == 2:
+        image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+
+    face = detect_face_yunet(image)
+    if face is None:
+        return None
+
+    recognizer = get_sface_recognizer()
+    if recognizer is None:
+        return None
+
+    aligned = None
+    try:
+        aligned = recognizer.alignCrop(image, face['row'])
+    except cv2.error:
+        aligned = None
+    if aligned is None or aligned.size == 0:
+        x, y, width, height = face['box']
+        crop = image[max(0, y):y + height, max(0, x):x + width]
+        if crop.size == 0:
+            return None
+        aligned = cv2.resize(crop, (112, 112))
+
+    try:
+        embedding = np.asarray(recognizer.feature(aligned), dtype=np.float32).flatten()
+    except cv2.error:
+        return None
+    return embedding if embedding.size == 128 else None
+
+
+def compare_face_embeddings(embedding_a, embedding_b):
+    """Cosine similarity between two SFace embeddings, or None when unavailable."""
+    if embedding_a is None or embedding_b is None:
+        return None
+    first = np.asarray(embedding_a, dtype=np.float32).flatten()
+    second = np.asarray(embedding_b, dtype=np.float32).flatten()
+    if first.size != 128 or second.size != 128:
+        return None
+
+    recognizer = get_sface_recognizer()
+    if recognizer is not None:
+        try:
+            return float(
+                recognizer.match(first, second, cv2.FaceRecognizerSF_FR_COSINE)
+            )
+        except cv2.error:
+            pass
+
+    # Manual cosine fallback when only the model math is unavailable.
+    denominator = float(np.linalg.norm(first) * np.linalg.norm(second))
+    if denominator <= 1e-9:
+        return None
+    return float(np.clip(np.dot(first, second) / denominator, -1.0, 1.0))
+
 
 # --------------------------------------------------------------------------
 # --------------------------------------------------------------------------
 # 1. Eye and Face detection
 # --------------------------------------------------------------------------
+@functools.lru_cache(maxsize=None)
+def _load_cascade(filename):
+    return cv2.CascadeClassifier(cv2.data.haarcascades + filename)
+
+
 def detect_face_and_iris(image_or_gray):
     """
     Unified multi-scale Face and Iris detection pipeline.
@@ -53,39 +222,49 @@ def detect_face_and_iris(image_or_gray):
     h, w = gray.shape
     min_sz = max(40, int(min(h, w) * 0.08))
 
-    face_default = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-    face_alt2 = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_alt2.xml")
-    eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_eye.xml")
-    glasses_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_eye_tree_eyeglasses.xml")
-
-    # 1. Face detection (primary + alt2 fallback)
-    min_face = max(70, int(min(h, w) * 0.18))
-    faces = face_default.detectMultiScale(gray, 1.1, 4, minSize=(min_face, min_face))
-    if len(faces) == 0:
-        faces = face_alt2.detectMultiScale(gray, 1.1, 3, minSize=(min_face, min_face))
+    face_default = _load_cascade("haarcascade_frontalface_default.xml")
+    face_alt2 = _load_cascade("haarcascade_frontalface_alt2.xml")
+    eye_cascade = _load_cascade("haarcascade_eye.xml")
+    glasses_cascade = _load_cascade("haarcascade_eye_tree_eyeglasses.xml")
 
     face_box = None
     eyes = []
 
-    if len(faces) > 0:
-        faces = sorted(faces, key=lambda f: f[2] * f[3], reverse=True)
-        fx, fy, fw, fh = faces[0]
-        face_box = (int(fx), int(fy), int(fw), int(fh))
+    # 1a. Preferred: YuNet face detection with landmark-guided eye boxes.
+    # This copes much better than Haar with glasses, hijabs, head tilt and
+    # normal webcam perspective.
+    yunet_face = detect_face_yunet(image_or_gray)
+    if yunet_face is not None:
+        face_box = yunet_face['box']
+        eyes = _eye_boxes_from_landmarks(yunet_face['landmarks'], face_box, gray.shape)
 
-        # Restrict ocular search to upper anatomical band (18% - 58% of face)
-        y0 = max(0, int(fy + 0.18 * fh))
-        y1 = min(h, int(fy + 0.58 * fh))
-        x0 = max(0, int(fx + 0.05 * fw))
-        x1 = min(w, int(fx + 0.95 * fw))
-        ocular_roi = gray[y0:y1, x0:x1]
+    # 1b. Haar fallback for macro eye crops and frames YuNet cannot use.
+    if not eyes:
+        min_face = max(70, int(min(h, w) * 0.18))
+        faces = face_default.detectMultiScale(gray, 1.1, 4, minSize=(min_face, min_face))
+        if len(faces) == 0:
+            faces = face_alt2.detectMultiScale(gray, 1.1, 3, minSize=(min_face, min_face))
 
-        if ocular_roi.size > 0:
-            eye_min = max(25, int(fw * 0.10))
-            detected_in_face = eye_cascade.detectMultiScale(ocular_roi, 1.1, 4, minSize=(eye_min, eye_min))
-            if len(detected_in_face) == 0:
-                detected_in_face = glasses_cascade.detectMultiScale(ocular_roi, 1.1, 3, minSize=(eye_min, eye_min))
-            for (ex, ey, ew, eh) in detected_in_face:
-                eyes.append((x0 + ex, y0 + ey, ew, eh))
+        if len(faces) > 0:
+            faces = sorted(faces, key=lambda f: f[2] * f[3], reverse=True)
+            hx, hy, hw, hh = faces[0]
+            if face_box is None:
+                face_box = (int(hx), int(hy), int(hw), int(hh))
+
+            # Restrict ocular search to upper anatomical band (18% - 58% of face)
+            y0 = max(0, int(hy + 0.18 * hh))
+            y1 = min(h, int(hy + 0.58 * hh))
+            x0 = max(0, int(hx + 0.05 * hw))
+            x1 = min(w, int(hx + 0.95 * hw))
+            ocular_roi = gray[y0:y1, x0:x1]
+
+            if ocular_roi.size > 0:
+                eye_min = max(25, int(hw * 0.10))
+                detected_in_face = eye_cascade.detectMultiScale(ocular_roi, 1.1, 4, minSize=(eye_min, eye_min))
+                if len(detected_in_face) == 0:
+                    detected_in_face = glasses_cascade.detectMultiScale(ocular_roi, 1.1, 3, minSize=(eye_min, eye_min))
+                for (ex, ey, ew, eh) in detected_in_face:
+                    eyes.append((x0 + ex, y0 + ey, ew, eh))
 
     if not eyes:
         # Fallback to direct eye detection across whole frame (for macro crops or occluded faces)

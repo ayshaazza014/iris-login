@@ -17,8 +17,14 @@ from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
 
+from iris_auth_project.env import load_env_file
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Load .env for every entry point (manage.py, WSGI, ASGI). Existing environment
+# variables always win, so deployment settings are never overwritten.
+load_env_file(BASE_DIR / '.env')
 
 
 # Quick-start development settings - unsuitable for production
@@ -29,7 +35,10 @@ DEBUG = os.environ.get('DJANGO_DEBUG', 'true' if _is_testing else 'false').lower
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
 if not SECRET_KEY:
     if not DEBUG:
-        raise ImproperlyConfigured('Set DJANGO_SECRET_KEY when DJANGO_DEBUG is false.')
+        raise ImproperlyConfigured(
+            'DJANGO_SECRET_KEY is not set. Copy .env.example to .env and set a secret, '
+            'or export DJANGO_SECRET_KEY. For local development, also set DJANGO_DEBUG=true.'
+        )
     SECRET_KEY = secrets.token_urlsafe(50)
 
 allowed_hosts_env = os.environ.get('DJANGO_ALLOWED_HOSTS')

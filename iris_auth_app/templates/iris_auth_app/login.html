@@ -19,6 +19,12 @@
         {% endfor %}
     {% endif %}
 
+    {% if not has_enrolled_accounts %}
+        <div class="message-box info" role="status">
+            No student iris accounts are enrolled yet. <a href="{% url 'register' %}">Create an account</a> to enroll your iris before logging in.
+        </div>
+    {% endif %}
+
     <form id="auth-form" method="post" enctype="multipart/form-data" class="form-grid" data-auto-capture="true">
         {% csrf_token %}
 
@@ -42,6 +48,7 @@
         </div>
 
         <div id="camera-status" class="scanner-status idle" role="status" aria-live="polite">Choose an iris image below, or optionally use the camera.</div>
+        <a id="camera-action-link" class="text-link" href="{% url 'register' %}" style="display:none;">Register your iris</a>
 
         <div class="form-actions">
             <button type="button" id="start-camera" class="primary-btn">Start Live Camera</button>

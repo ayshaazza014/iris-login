@@ -11,6 +11,7 @@ const retakeBtn = document.getElementById('retake-image');
 const manualScanBtn = document.getElementById('manual-scan-btn');
 const captureInput = document.getElementById('capture');
 const authForm = document.getElementById('auth-form');
+const cameraActionLink = document.getElementById('camera-action-link');
 
 let stream = null;
 let captureDataUrl = null;
@@ -66,6 +67,7 @@ async function startCamera() {
   stopCamera();
   captureDataUrl = null;
   liveAttemptCount = 0;
+  if (cameraActionLink) cameraActionLink.style.display = 'none';
   if (captureInput) captureInput.value = '';
   if (cameraPreview) cameraPreview.src = '';
   if (captureBtn) captureBtn.disabled = true;
@@ -249,6 +251,18 @@ function scanCurrentFrame() {
 
       if (response.ok) {
         const data = await response.json();
+        if (data.status === 'no_templates') {
+          isSubmitting = true;
+          stopLiveScanner();
+          if (cameraPanel) cameraPanel.classList.remove('scanning');
+          if (scannerBadge) scannerBadge.textContent = 'No accounts enrolled';
+          setStatus(data.message || 'No iris accounts are enrolled yet.', 'failure');
+          if (cameraActionLink && data.register_url) {
+            cameraActionLink.href = data.register_url;
+            cameraActionLink.style.display = 'inline-flex';
+          }
+          return;
+        }
         if (data.status === 'success') {
           isSubmitting = true;
           stopLiveScanner();

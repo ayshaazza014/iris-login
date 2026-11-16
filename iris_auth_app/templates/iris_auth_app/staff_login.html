@@ -19,6 +19,12 @@
         {% endfor %}
     {% endif %}
 
+    {% if not has_enrolled_accounts %}
+        <div class="message-box info" role="status">
+            No staff iris accounts are enrolled yet. An administrator must create a staff account before staff login can work.
+        </div>
+    {% endif %}
+
     <form id="auth-form" method="post" enctype="multipart/form-data" class="form-grid" data-auto-capture="true">
         {% csrf_token %}
 

@@ -13,6 +13,7 @@ The application includes:
 - Re-enrollment workflows with audit logging
 - Bounded sliding-window rate limiting, client frame throttling, and header-based decompression bomb protection against denial-of-service attacks
 - Quantitative biometric evaluation suite with FAR/FRR measurement and latency benchmarking
+- Optional YuNet face/landmark detection and SFace second-factor assist for marginal 1:1 iris matches (`models/`, MIT-licensed OpenCV Zoo weights)
 
 ## Getting Started
 
@@ -32,8 +33,10 @@ Copy `.env.example` to `.env` and configure your settings:
 ```powershell
 cp .env.example .env
 ```
+The `.env` file is loaded automatically by `manage.py`, WSGI and ASGI. You can also export the same variables in your shell.
 Ensure `DJANGO_SECRET_KEY` is set.
 - `DJANGO_DEBUG`: Set to `true` for local development; defaults securely to `false` in production.
+- `DJANGO_ALLOWED_HOSTS`: Add LAN IPs when testing from a phone, e.g. `localhost,127.0.0.1,192.168.1.10`.
 - `IRIS_TRUST_PROXY_HEADERS`: Set to `true` only when deployed behind a trusted reverse proxy (e.g. Nginx) that sanitizes `X-Forwarded-For`.
 
 ### 4. Initialize Database Schema & Seed Demo Data
@@ -42,10 +45,18 @@ python manage.py migrate
 python manage.py seed_users --demo
 ```
 The `seed_users` command creates:
-- `alice` (Student demo account)
-- `bob` (Student demo account)
-- `charlie` (Student demo account)
-- `staff_alice` (Staff demo account)
+- `alice` (Student demo account, iris template enrolled)
+- `bob` (Student demo account, no template)
+- `charlie` (Student demo account, no template)
+- `staff_alice` (Staff demo account, iris template enrolled)
+
+**Demo login:** open `http://127.0.0.1:8000/login/` and upload `synthetic_eye.png` from the project root (leave the identifier blank). For the staff portal, open `/staff/login/` and upload the same image. The live camera will not match the synthetic image unless you show that image to the camera.
+
+**To log in with your own eye:** open `/register/` and enroll your own iris first. The seeded demo templates belong to the synthetic image, not to your eye. For admin access, create a superuser:
+```powershell
+python manage.py createsuperuser
+```
+then log in at `/admin/` with the password you chose.
 
 > **Security Note:** In non-debug production environments, biometric template enrollment via `synthetic_eye.png` is automatically skipped unless explicitly invoked with `--demo`.
 
@@ -54,6 +65,8 @@ The `seed_users` command creates:
 python manage.py runserver
 ```
 Visit `http://127.0.0.1:8000/`.
+
+If port 8000 is already used by another service, run `python manage.py runserver 8010` and open `http://127.0.0.1:8010/` instead. If the page loads without styling or the camera script, check that `DJANGO_DEBUG=true` is set in `.env` for local development. Production deployments must run `collectstatic` and serve static files through the web server.
 
 ---
 
@@ -93,6 +106,30 @@ The command executes statistical comparisons across multi-session subject cohort
 - **Feature Extraction Latency:** ~100 ms / frame (compliant with NFR-08)
 - **Pairwise Comparison Latency:** ~7.0 ms / comparison
 - **Biometric Pipeline:** OpenCV Haar Face/Eye Detection -> Circular Hough Segmentation -> Daugman Rubber-Sheet Normalization (64x512) -> 2D Log-Gabor Encoding (`gabor-eye-crop-v2`) fused with 259-D Periocular Gradient Orientation and Facial Geometry.
+
+---
+
+## Face Detection & Face-Assisted Verification
+
+The optional models in `models/` are loaded through the existing OpenCV
+dependency; no extra Python package is required.
+
+- `face_detection_yunet_2023mar.onnx` (233 KB, MIT) improves face and eye
+  localization and is used as the preferred detector, with the Haar cascades as
+  a fallback for close-up/macro eye images.
+- `face_recognition_sface_2021dec.onnx` (37 MB, MIT) produces a 128-D face
+  embedding during enrollment and login.
+
+For a 1:1 login (username or student ID supplied), if the iris distance is
+above the normal `0.35` threshold but still within `0.46`, and the SFace
+cosine similarity is at least `0.60`, the login is accepted on the combined
+evidence. This reduces false rejections for dark irises and visible-light
+webcams while keeping the face check as an assist, not a standalone factor.
+Set `IRIS_FACE_ASSIST_ENABLED=false` to require iris-only matching. The
+thresholds can be tuned with `IRIS_FACE_ASSIST_MAX_IRIS_DISTANCE` and
+`IRIS_FACE_ASSIST_MIN_SIMILARITY`.
+
+The 1:N path (no identifier supplied) remains iris-only and fail-closed.
 
 ---
 

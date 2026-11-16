@@ -9,6 +9,7 @@ from datetime import time
 from iris_auth_app.models import AttendanceRecord, FeeRecord, IrisUser, TimetableEntry
 from iris_auth_app.services import (
     ensure_iris_template_for_user,
+    extract_face_embedding,
     extract_facial_features,
     extract_template_from_image,
 )
@@ -26,10 +27,10 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         sample_users = [
-            {'username': 'alice', 'display_name': 'Alice Demo', 'student_id': 'S-1001', 'password': 'DemoPass123!', 'is_staff': False},
-            {'username': 'bob', 'display_name': 'Bob Demo', 'student_id': 'S-1002', 'password': 'DemoPass123!', 'is_staff': False},
-            {'username': 'charlie', 'display_name': 'Charlie Demo', 'student_id': 'S-1003', 'password': 'DemoPass123!', 'is_staff': False},
-            {'username': 'staff_alice', 'display_name': 'Staff Alice Demo', 'student_id': None, 'password': 'StaffPass123!', 'is_staff': True},
+            {'username': 'alice', 'display_name': 'Alice Demo', 'student_id': 'S-1001', 'is_staff': False},
+            {'username': 'bob', 'display_name': 'Bob Demo', 'student_id': 'S-1002', 'is_staff': False},
+            {'username': 'charlie', 'display_name': 'Charlie Demo', 'student_id': 'S-1003', 'is_staff': False},
+            {'username': 'staff_alice', 'display_name': 'Staff Alice Demo', 'student_id': None, 'is_staff': True},
         ]
 
         for payload in sample_users:
@@ -42,8 +43,10 @@ class Command(BaseCommand):
                 },
             )
             if created:
-                user.set_password(payload['password'])
-                user.save()
+                # The portal is iris-only; demo accounts intentionally have no
+                # usable password so they cannot be used for password login.
+                user.set_unusable_password()
+                user.save(update_fields=['password'])
                 self.stdout.write(self.style.SUCCESS(f'Created {user.username}'))
             else:
                 self.stdout.write(self.style.WARNING(f'Already exists: {user.username}'))
@@ -99,7 +102,6 @@ class Command(BaseCommand):
         # Gate synthetic enrollment behind settings.DEBUG or explicit --demo flag
         allow_demo_enrollment = getattr(settings, 'DEBUG', False) or options.get('demo')
         synthetic_path = Path(settings.BASE_DIR) / 'synthetic_eye.png'
-        alice = IrisUser.objects.filter(username='alice').first()
 
         if not allow_demo_enrollment:
             self.stdout.write(
@@ -110,19 +112,64 @@ class Command(BaseCommand):
             )
             return
 
-        if synthetic_path.exists():
-            if alice and not getattr(alice, 'iris_template', None):
-                try:
-                    img = cv2.imread(str(synthetic_path))
-                    if img is not None:
-                        code, mask = extract_template_from_image(img)
-                        facial_feat = extract_facial_features(img)
-                        ensure_iris_template_for_user(alice, code, mask, facial_features_array=facial_feat)
-                        self.stdout.write(
-                            self.style.WARNING(
-                                'SECURITY WARNING: Enrolled demo synthetic template for alice. '
-                                'Do not deploy with seeded accounts or demo credentials!'
-                            )
-                        )
-                except Exception as exc:
-                    self.stdout.write(self.style.WARNING(f'Could not enroll synthetic template: {exc}'))
+        if not synthetic_path.exists():
+            self.stdout.write(
+                self.style.WARNING(
+                    'Demo iris image synthetic_eye.png is missing, so no demo templates were enrolled.\n'
+                    'Register your own iris at /register/ before logging in.'
+                )
+            )
+            return
+
+        # Enroll both a student and a staff demo account. The login views filter
+        # by role, so sharing the demo image does not make the 1:N search
+        # ambiguous across the student and staff populations.
+        demo_accounts = ('alice', 'staff_alice')
+        enrolled = []
+        try:
+            img = cv2.imread(str(synthetic_path))
+            if img is None:
+                raise ValueError('synthetic_eye.png could not be read')
+            code, mask = extract_template_from_image(img)
+            facial_feat = extract_facial_features(img)
+            face_embedding = extract_face_embedding(img)
+        except Exception as exc:
+            self.stdout.write(self.style.WARNING(f'Could not extract the demo iris template: {exc}'))
+            return
+
+        for username in demo_accounts:
+            user = IrisUser.objects.filter(username=username).first()
+            if user is None or getattr(user, 'iris_template', None):
+                continue
+            try:
+                ensure_iris_template_for_user(
+                    user,
+                    code,
+                    mask,
+                    facial_features_array=facial_feat,
+                    face_embedding_array=face_embedding,
+                )
+                enrolled.append(username)
+            except Exception as exc:
+                self.stdout.write(self.style.WARNING(f'Could not enroll {username}: {exc}'))
+
+        if enrolled:
+            self.stdout.write(
+                self.style.WARNING(
+                    'SECURITY WARNING: Enrolled the demo synthetic template for '
+                    f'{", ".join(enrolled)}. Do not deploy with seeded accounts!'
+                )
+            )
+            self.stdout.write(
+                self.style.SUCCESS(
+                    'Demo login: open /login/ (student) or /staff/login/ (staff) and upload '
+                    'synthetic_eye.png from the project root. The camera will not match this image '
+                    'unless it is shown to the camera.'
+                )
+            )
+            self.stdout.write(
+                self.style.SUCCESS(
+                    'To use your own eye instead, create an account at /register/ (students) or '
+                    'have an administrator create a staff account.'
+                )
+            )

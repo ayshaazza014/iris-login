@@ -23,6 +23,7 @@ from .services import (
     TEMPLATE_ENCODING_VERSION,
     detect_face_and_iris,
     ensure_iris_template_for_user,
+    extract_face_embedding,
     extract_facial_features,
     extract_secondary_template_from_image,
     extract_template_from_image,
@@ -33,10 +34,13 @@ from .services import (
 
 logger = logging.getLogger(__name__)
 
-MAX_CAPTURE_BYTES = 5 * 1024 * 1024
-MAX_CAPTURE_WIDTH = 2048
-MAX_CAPTURE_HEIGHT = 2048
-MAX_CAPTURE_PIXELS = 16 * 1024 * 1024
+MAX_CAPTURE_BYTES = 8 * 1024 * 1024
+MAX_CAPTURE_WIDTH = 8192
+MAX_CAPTURE_HEIGHT = 8192
+MAX_CAPTURE_PIXELS = 20 * 1024 * 1024
+# Large phone photos are accepted, then downscaled before the OpenCV pipeline
+# so detection cost stays bounded and iris texture remains usable.
+PROCESSING_MAX_DIMENSION = 1600
 
 DEFAULT_RATE_LIMIT_ATTEMPTS = int(os.environ.get('IRIS_AUTH_RATE_LIMIT_ATTEMPTS', '30'))
 DEFAULT_RATE_LIMIT_WINDOW = int(os.environ.get('IRIS_AUTH_RATE_LIMIT_WINDOW', '60'))
@@ -211,11 +215,11 @@ def _decode_capture(uploaded_file):
     if uploaded_file is None:
         raise ValidationError('Please upload an iris image or capture one with the camera before continuing.')
     if uploaded_file.size > MAX_CAPTURE_BYTES:
-        raise ValidationError('The image is too large. Please capture an image under 5 MB.')
+        raise ValidationError('The image is too large. Please capture an image under 8 MB.')
 
     image_bytes = uploaded_file.read(MAX_CAPTURE_BYTES + 1)
     if len(image_bytes) > MAX_CAPTURE_BYTES:
-        raise ValidationError('The image is too large. Please capture an image under 5 MB.')
+        raise ValidationError('The image is too large. Please capture an image under 8 MB.')
 
     # Inspect image dimensions from header before calling cv2.imdecode
     dims = _inspect_image_dimensions(image_bytes)
@@ -229,7 +233,9 @@ def _decode_capture(uploaded_file):
         or header_height > MAX_CAPTURE_HEIGHT
         or (header_width * header_height) > MAX_CAPTURE_PIXELS
     ):
-        raise ValidationError('The image dimensions are invalid or too large.')
+        raise ValidationError(
+            'The image dimensions are invalid or too large. Use a photo under 20 megapixels (for example 4032x3024).'
+        )
 
     try:
         image = cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
@@ -245,7 +251,18 @@ def _decode_capture(uploaded_file):
         or height > MAX_CAPTURE_HEIGHT
         or (width * height) > MAX_CAPTURE_PIXELS
     ):
-        raise ValidationError('The image dimensions are invalid or too large.')
+        raise ValidationError(
+            'The image dimensions are invalid or too large. Use a photo under 20 megapixels (for example 4032x3024).'
+        )
+
+    longest_edge = max(width, height)
+    if longest_edge > PROCESSING_MAX_DIMENSION:
+        scale = PROCESSING_MAX_DIMENSION / float(longest_edge)
+        image = cv2.resize(
+            image,
+            (max(1, int(round(width * scale))), max(1, int(round(height * scale)))),
+            interpolation=cv2.INTER_AREA,
+        )
     return image
 
 
@@ -303,6 +320,7 @@ def register_view(request):
                 code, mask = extract_template_from_image(image)
                 sec_code, sec_mask = extract_secondary_template_from_image(image)
                 facial_features = extract_facial_features(image)
+                face_embedding = extract_face_embedding(image)
                 with transaction.atomic():
                     user = IrisUser.objects.create_user(
                         username=username,
@@ -317,6 +335,7 @@ def register_view(request):
                         secondary_code_array=sec_code,
                         secondary_mask_array=sec_mask,
                         facial_features_array=facial_features,
+                        face_embedding_array=face_embedding,
                     )
 
                 messages.success(request, f'Enrollment successful for {user.display_name}. You can now log in using your iris.')
@@ -358,6 +377,7 @@ def register_view(request):
                 code, mask = extract_template_from_image(image)
                 sec_code, sec_mask = extract_secondary_template_from_image(image)
                 facial_features = extract_facial_features(image)
+                face_embedding = extract_face_embedding(image)
             except ValidationError as exc:
                 messages.error(request, str(exc))
                 return render(request, 'iris_auth_app/register.html')
@@ -386,6 +406,7 @@ def register_view(request):
                         secondary_code_array=sec_code,
                         secondary_mask_array=sec_mask,
                         facial_features_array=facial_features,
+                        face_embedding_array=face_embedding,
                     )
             except ValidationError as exc:
                 messages.error(request, str(exc))
@@ -406,6 +427,7 @@ def register_view(request):
 
 @require_http_methods(["GET", "POST"])
 def staff_login_view(request):
+    context = _login_render_context(staff_only=True)
     if request.method == 'POST':
         is_ajax = (
             request.headers.get('x-requested-with') == 'XMLHttpRequest'
@@ -426,6 +448,13 @@ def staff_login_view(request):
             resp['Retry-After'] = '5'
             return resp
 
+        if not context['has_enrolled_accounts']:
+            payload = _no_template_payload(staff_only=True)
+            if is_ajax:
+                return JsonResponse(payload)
+            messages.error(request, payload['message'])
+            return render(request, 'iris_auth_app/staff_login.html', context)
+
         identifier = request.POST.get('identifier', '').strip()
         try:
             image = _decode_capture(request.FILES.get('capture'))
@@ -439,7 +468,7 @@ def staff_login_view(request):
                         if is_ajax:
                             return JsonResponse({'status': 'retry', 'message': msg})
                         messages.error(request, msg)
-                        return render(request, 'iris_auth_app/staff_login.html')
+                        return render(request, 'iris_auth_app/staff_login.html', context)
 
                     login(request, user)
                     if is_ajax:
@@ -459,15 +488,21 @@ def staff_login_view(request):
                 if is_ajax:
                     return JsonResponse({'status': 'retry', 'message': msg})
                 messages.error(request, msg)
-                return render(request, 'iris_auth_app/staff_login.html')
+                return render(request, 'iris_auth_app/staff_login.html', context)
 
             user, failure_reason = identify_user_from_iris_result(image, staff_only=True)
             if user is None:
+                if failure_reason == 'no_templates':
+                    payload = _no_template_payload(staff_only=True)
+                    if is_ajax:
+                        return JsonResponse(payload)
+                    messages.error(request, payload['message'])
+                    return render(request, 'iris_auth_app/staff_login.html', context)
                 msg = _iris_login_failure_message(failure_reason, staff_only=True)
                 if is_ajax:
                     return JsonResponse({'status': 'retry', 'message': msg})
                 messages.error(request, msg)
-                return render(request, 'iris_auth_app/staff_login.html')
+                return render(request, 'iris_auth_app/staff_login.html', context)
 
             if not user.is_staff:
                 logger.warning('Iris identification returned a non-staff user for staff login.')
@@ -475,7 +510,7 @@ def staff_login_view(request):
                 if is_ajax:
                     return JsonResponse({'status': 'retry', 'message': msg})
                 messages.error(request, msg)
-                return render(request, 'iris_auth_app/staff_login.html')
+                return render(request, 'iris_auth_app/staff_login.html', context)
 
             login(request, user)
             if is_ajax:
@@ -495,15 +530,15 @@ def staff_login_view(request):
             if is_ajax:
                 return JsonResponse({'status': 'retry', 'message': str(exc)})
             messages.error(request, str(exc))
-            return render(request, 'iris_auth_app/staff_login.html')
+            return render(request, 'iris_auth_app/staff_login.html', context)
         except (cv2.error, ImportError, OSError, TypeError, ValueError, AttributeError):
             logger.exception('Unexpected error while processing a staff iris login.')
             if is_ajax:
                 return JsonResponse({'status': 'retry', 'message': 'Scan processing issue. Retrying...'})
             messages.error(request, 'An unexpected error occurred while processing the iris image.')
-            return render(request, 'iris_auth_app/staff_login.html')
+            return render(request, 'iris_auth_app/staff_login.html', context)
 
-    return render(request, 'iris_auth_app/staff_login.html')
+    return render(request, 'iris_auth_app/staff_login.html', context)
 
 
 @login_required(login_url='staff_login')
@@ -531,6 +566,7 @@ def staff_register_view(request):
             code, mask = extract_template_from_image(image)
             sec_code, sec_mask = extract_secondary_template_from_image(image)
             facial_features = extract_facial_features(image)
+            face_embedding = extract_face_embedding(image)
         except ValidationError as exc:
             messages.error(request, str(exc))
             return render(request, 'iris_auth_app/staff_register.html')
@@ -556,6 +592,7 @@ def staff_register_view(request):
                     secondary_code_array=sec_code,
                     secondary_mask_array=sec_mask,
                     facial_features_array=facial_features,
+                        face_embedding_array=face_embedding,
                 )
         except ValidationError as exc:
             messages.error(request, str(exc))
@@ -594,6 +631,7 @@ def staff_reenroll_view(request):
             code, mask = extract_template_from_image(image)
             sec_code, sec_mask = extract_secondary_template_from_image(image)
             facial_features = extract_facial_features(image)
+            face_embedding = extract_face_embedding(image)
             # Note on BUG-023: select_for_update() provides row-level locking on Postgres/MySQL;
             # on SQLite (dev default), atomic() provides database-level transaction locking.
             with transaction.atomic():
@@ -609,6 +647,7 @@ def staff_reenroll_view(request):
                     secondary_code_array=sec_code,
                     secondary_mask_array=sec_mask,
                     facial_features_array=facial_features,
+                        face_embedding_array=face_embedding,
                 )
 
             logger.info(f"Staff '{request.user.username}' re-enrolled iris template for student '{student.username}' (id={student.pk}).")
@@ -627,6 +666,7 @@ def staff_reenroll_view(request):
 
 @require_http_methods(["GET", "POST"])
 def login_view(request):
+    context = _login_render_context(staff_only=False)
     if request.method == 'POST':
         is_ajax = (
             request.headers.get('x-requested-with') == 'XMLHttpRequest'
@@ -658,7 +698,14 @@ def login_view(request):
             if is_ajax:
                 return JsonResponse({'status': 'retry', 'message': msg})
             messages.error(request, msg)
-            return render(request, 'iris_auth_app/login.html')
+            return render(request, 'iris_auth_app/login.html', context)
+
+        if not context['has_enrolled_accounts']:
+            payload = _no_template_payload(staff_only=False)
+            if is_ajax:
+                return JsonResponse(payload)
+            messages.error(request, payload['message'])
+            return render(request, 'iris_auth_app/login.html', context)
 
         try:
             image = _decode_capture(uploaded_file)
@@ -687,7 +734,7 @@ def login_view(request):
                         resp_data['detection'] = det_info
                     return JsonResponse(resp_data)
                 messages.error(request, msg)
-                return render(request, 'iris_auth_app/login.html')
+                return render(request, 'iris_auth_app/login.html', context)
 
             user, failure_reason = identify_user_from_iris_result(image, staff_only=False)
             logger.warning("[LOGIN_EVAL] ident='%s' matched=%s failure_reason=%s is_ajax=%s", identifier, bool(user), failure_reason, is_ajax)
@@ -708,6 +755,12 @@ def login_view(request):
                 messages.success(request, f'Iris verification succeeded for {user.display_name or user.username}.')
                 return redirect('dashboard')
 
+            if failure_reason == 'no_templates':
+                payload = _no_template_payload(staff_only=False)
+                if is_ajax:
+                    return JsonResponse(payload)
+                messages.error(request, payload['message'])
+                return render(request, 'iris_auth_app/login.html', context)
             msg = _iris_login_failure_message(failure_reason, staff_only=False)
             if is_ajax:
                 resp_data = {'status': 'retry', 'message': msg}
@@ -715,22 +768,22 @@ def login_view(request):
                     resp_data['detection'] = det_info
                 return JsonResponse(resp_data)
             messages.error(request, msg)
-            return render(request, 'iris_auth_app/login.html')
+            return render(request, 'iris_auth_app/login.html', context)
 
         except ValidationError as exc:
             logger.warning("[LOGIN_EXC] %s", exc)
             if is_ajax:
                 return JsonResponse({'status': 'retry', 'message': str(exc)})
             messages.error(request, str(exc))
-            return render(request, 'iris_auth_app/login.html')
+            return render(request, 'iris_auth_app/login.html', context)
         except (cv2.error, ImportError, OSError, TypeError, ValueError, AttributeError):
             logger.exception('Unexpected error while processing an iris login.')
             if is_ajax:
                 return JsonResponse({'status': 'retry', 'message': 'Scan processing issue. Retrying...'})
             messages.error(request, 'An unexpected error occurred while processing the iris image.')
-            return render(request, 'iris_auth_app/login.html')
+            return render(request, 'iris_auth_app/login.html', context)
 
-    return render(request, 'iris_auth_app/login.html')
+    return render(request, 'iris_auth_app/login.html', context)
 
 
 @require_http_methods(["POST"])
@@ -741,6 +794,35 @@ def verify_iris(request):
         return resp
     request._rate_limited_checked = True
     return login_view(request)
+
+
+def _has_active_templates(*, staff_only):
+    templates = IrisTemplate.objects.filter(
+        enrollment_status='active',
+        encoding_version=TEMPLATE_ENCODING_VERSION,
+        user__is_active=True,
+        user__is_staff=staff_only,
+    )
+    if not staff_only:
+        templates = templates.filter(user__is_superuser=False)
+    return templates.exists()
+
+
+def _login_render_context(*, staff_only):
+    return {'has_enrolled_accounts': _has_active_templates(staff_only=staff_only)}
+
+
+def _no_template_payload(*, staff_only):
+    if staff_only:
+        return {
+            'status': 'no_templates',
+            'message': 'No compatible staff iris templates are enrolled. Ask an administrator to create a staff account.',
+        }
+    return {
+        'status': 'no_templates',
+        'message': 'No compatible student iris templates are enrolled. Create an account to enroll your iris.',
+        'register_url': '/register/',
+    }
 
 
 def _iris_login_failure_message(reason, *, staff_only):

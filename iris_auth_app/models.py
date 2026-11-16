@@ -174,6 +174,11 @@ class IrisTemplate(models.Model):
         blank=True,
         help_text='Serialized facial and periocular feature descriptor bytes for multi-feature fusion.',
     )
+    face_embedding = models.BinaryField(
+        null=True,
+        blank=True,
+        help_text='Serialized 128-D SFace face embedding used as a second-factor login assist.',
+    )
     enrollment_status = models.CharField(
         max_length=20,
         choices=[('pending', 'Pending'), ('active', 'Active'), ('rejected', 'Rejected')],
@@ -223,7 +228,8 @@ class IrisTemplate(models.Model):
         secondary_code_array=None,
         secondary_mask_array=None,
         facial_features_array=None,
-        encoding_version='gabor-v1',
+        face_embedding_array=None,
+        encoding_version='gabor-eye-crop-v2',
     ):
         code_bytes, code_shape, code_dtype = cls.serialize_array(code_array)
         mask_bytes, mask_shape, mask_dtype = cls.serialize_array(mask_array)
@@ -239,6 +245,13 @@ class IrisTemplate(models.Model):
             facial_arr = np.asarray(facial_features_array, dtype=np.float32)
             facial_bytes = facial_arr.tobytes()
 
+        face_embedding_bytes = None
+        if face_embedding_array is not None:
+            face_embedding = np.asarray(face_embedding_array, dtype=np.float32).flatten()
+            if face_embedding.size != 128:
+                raise ValidationError('The face embedding must contain 128 values.')
+            face_embedding_bytes = face_embedding.tobytes()
+
         return cls.objects.create(
             user=user,
             code=code_bytes,
@@ -246,6 +259,7 @@ class IrisTemplate(models.Model):
             secondary_code=sec_code_bytes,
             secondary_mask=sec_mask_bytes,
             facial_features=facial_bytes,
+            face_embedding=face_embedding_bytes,
             code_shape=','.join(str(dim) for dim in code_shape),
             code_dtype=code_dtype,
             mask_shape=','.join(str(dim) for dim in mask_shape),
@@ -264,6 +278,16 @@ class IrisTemplate(models.Model):
             return np.frombuffer(self.facial_features, dtype=np.float32)
         except Exception:
             return None
+
+    def get_face_embedding(self):
+        """Return the deserialized 128-D SFace embedding, or None."""
+        if not self.face_embedding:
+            return None
+        try:
+            embedding = np.frombuffer(self.face_embedding, dtype=np.float32)
+        except Exception:
+            return None
+        return embedding if embedding.size == 128 else None
 
     def validate_template(self):
         if not self.code or not self.mask:

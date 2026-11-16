@@ -16,6 +16,9 @@ MODULE_PATH = Path(__file__).resolve().parents[1] / 'iris_extract.py'
 MATCH_THRESHOLD = float(os.environ.get('IRIS_MATCH_THRESHOLD', '0.35'))
 VERIFICATION_THRESHOLD = float(os.environ.get('IRIS_VERIFICATION_THRESHOLD', '0.35'))
 FUSION_FACE_WEIGHT = float(os.environ.get('IRIS_FACIAL_FEATURE_WEIGHT', '0.20'))
+FACE_ASSIST_ENABLED = os.environ.get('IRIS_FACE_ASSIST_ENABLED', 'true').lower() in ('1', 'true', 'yes')
+FACE_ASSIST_MAX_IRIS_DISTANCE = float(os.environ.get('IRIS_FACE_ASSIST_MAX_IRIS_DISTANCE', '0.46'))
+FACE_ASSIST_MIN_SIMILARITY = float(os.environ.get('IRIS_FACE_ASSIST_MIN_SIMILARITY', '0.60'))
 TEMPLATE_ENCODING_VERSION = 'gabor-eye-crop-v2'
 
 _iris_module = None
@@ -55,6 +58,7 @@ def ensure_iris_template_for_user(
     secondary_code_array=None,
     secondary_mask_array=None,
     facial_features_array=None,
+    face_embedding_array=None,
     encoding_version=TEMPLATE_ENCODING_VERSION,
 ):
     if not isinstance(user, IrisUser):
@@ -93,6 +97,18 @@ def ensure_iris_template_for_user(
     if facial_features_array is not None:
         facial_arr = np.asarray(facial_features_array, dtype=np.float32)
         template.facial_features = facial_arr.tobytes()
+    else:
+        template.facial_features = None
+
+    if face_embedding_array is not None:
+        face_embedding = np.asarray(face_embedding_array, dtype=np.float32).flatten()
+        if face_embedding.size != 128:
+            raise ValidationError('The face embedding must contain 128 values.')
+        if not np.all(np.isfinite(face_embedding)):
+            raise ValidationError('The face embedding contains invalid values.')
+        template.face_embedding = face_embedding.tobytes()
+    else:
+        template.face_embedding = None
 
     template.code_shape = ','.join(str(dimension) for dimension in code_shape)
     template.mask_shape = ','.join(str(dimension) for dimension in mask_shape)
@@ -157,6 +173,32 @@ def extract_facial_features(image_array):
         module = load_iris_module()
         if hasattr(module, 'extract_facial_features'):
             return module.extract_facial_features(image_array)
+    except Exception:
+        pass
+    return None
+
+
+def extract_face_embedding(image_array):
+    """Return a 128-D SFace embedding, or None when the optional model/face is absent."""
+    if image_array is None:
+        return None
+    try:
+        module = load_iris_module()
+        if hasattr(module, 'extract_face_embedding'):
+            return module.extract_face_embedding(image_array)
+    except Exception:
+        pass
+    return None
+
+
+def compare_face_embeddings(embedding_a, embedding_b):
+    """Cosine similarity between two SFace embeddings, or None when unavailable."""
+    if embedding_a is None or embedding_b is None:
+        return None
+    try:
+        module = load_iris_module()
+        if hasattr(module, 'compare_face_embeddings'):
+            return module.compare_face_embeddings(embedding_a, embedding_b)
     except Exception:
         pass
     return None
@@ -314,6 +356,7 @@ def verify_iris_for_user(identifier, image_array, *, threshold=VERIFICATION_THRE
     if user is None:
         return None
 
+    face_similarity = None
     try:
         template = IrisTemplate.objects.filter(user=user).first()
         if template is None:
@@ -322,6 +365,30 @@ def verify_iris_for_user(identifier, image_array, *, threshold=VERIFICATION_THRE
         captured_templates = extract_all_candidate_templates(image_array)
         stored_facial = template.get_facial_features()
         captured_facial = extract_facial_features(image_array)
+        stored_face_embedding = template.get_face_embedding()
+        captured_face_embedding = (
+            extract_face_embedding(image_array)
+            if FACE_ASSIST_ENABLED and stored_face_embedding is not None
+            else None
+        )
+        if captured_face_embedding is not None:
+            face_similarity = compare_face_embeddings(
+                stored_face_embedding,
+                captured_face_embedding,
+            )
+
+        # When a strong SFace embedding is available on both sides, use the
+        # pure iris distance and let the face check act as an explicit rescue
+        # for marginal cases. The legacy 259-D descriptor fusion remains the
+        # fallback for templates enrolled before SFace was added.
+        use_sface_distance = (
+            FACE_ASSIST_ENABLED
+            and stored_face_embedding is not None
+            and captured_face_embedding is not None
+        )
+        distance_facial_a = None if use_sface_distance else stored_facial
+        distance_facial_b = None if use_sface_distance else captured_facial
+
         distances = []
         for s_code, s_mask in stored_templates:
             for c_code, c_mask in captured_templates:
@@ -330,8 +397,8 @@ def verify_iris_for_user(identifier, image_array, *, threshold=VERIFICATION_THRE
                     s_mask,
                     c_code,
                     c_mask,
-                    feat_a=stored_facial,
-                    feat_b=captured_facial,
+                    feat_a=distance_facial_a,
+                    feat_b=distance_facial_b,
                 )
                 if math.isfinite(float(d)):
                     distances.append(d)
@@ -341,8 +408,23 @@ def verify_iris_for_user(identifier, image_array, *, threshold=VERIFICATION_THRE
     except (ValidationError, ValueError, TypeError, AttributeError):
         return None
 
-    logger.warning('[VERIFY_EVAL] user=%s best_distance=%.4f (threshold=%.2f)', user.username, best_distance, threshold)
-    if math.isfinite(float(best_distance)) and best_distance <= threshold:
+    iris_accepted = math.isfinite(float(best_distance)) and best_distance <= threshold
+    face_rescue = (
+        not iris_accepted
+        and FACE_ASSIST_ENABLED
+        and face_similarity is not None
+        and best_distance <= FACE_ASSIST_MAX_IRIS_DISTANCE
+        and face_similarity >= FACE_ASSIST_MIN_SIMILARITY
+    )
+    logger.warning(
+        '[VERIFY_EVAL] user=%s best_distance=%.4f (threshold=%.2f) face_similarity=%s face_rescue=%s',
+        user.username,
+        best_distance,
+        threshold,
+        'n/a' if face_similarity is None else f'{face_similarity:.3f}',
+        face_rescue,
+    )
+    if iris_accepted or face_rescue:
         return user
     return None
 
